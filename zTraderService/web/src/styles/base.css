@@ -1,0 +1,169 @@
+/* Ported from public/index.html. Element defaults first, then shared utilities. */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+body {
+  background: var(--bg);
+  color: var(--txt);
+  font:
+    14px/1.5 -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+a {
+  color: var(--blue);
+}
+label {
+  font-size: 12px;
+  color: var(--dim);
+  display: block;
+  margin: 8px 0 4px;
+}
+select,
+button,
+input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--txt);
+  font-size: 14px;
+  font-family: inherit;
+}
+button {
+  cursor: pointer;
+  font-weight: 600;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+th,
+td {
+  text-align: left;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  color: var(--dim);
+  font-weight: 600;
+}
+
+/* ---- text colours used inside table cells and summaries ---- */
+.buy,
+.pos {
+  color: var(--green);
+}
+.sell,
+.neg {
+  color: var(--red);
+}
+.c-red {
+  color: var(--red);
+}
+.c-green {
+  color: var(--green);
+}
+.c-amber {
+  color: var(--amber);
+}
+.c-txt {
+  color: var(--txt);
+}
+.muted {
+  color: var(--dim);
+  font-size: 12px;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.spacer {
+  flex: 1;
+}
+.mt6 {
+  margin-top: 6px;
+}
+.mt8 {
+  margin-top: 8px;
+}
+.mb8 {
+  margin-bottom: 8px;
+}
+.mb10 {
+  margin-bottom: 10px;
+}
+
+/* ---- buttons ---- */
+.btn-run {
+  background: #1f6feb;
+  border-color: #1f6feb;
+}
+.btn-check {
+  background: #0d7d7d;
+  border-color: #0d7d7d;
+}
+.btn-start {
+  background: #238636;
+  border-color: #238636;
+}
+.btn-stop {
+  background: #b62324;
+  border-color: #b62324;
+}
+.btn-save {
+  background: #8250df;
+  border-color: #8250df;
+}
+.btn-inline {
+  width: auto;
+  padding: 5px 12px;
+  font-size: 12px;
+}
+.btn-sm {
+  width: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+.btn-danger {
+  border-color: #b62324;
+  color: #ff8a8a;
+  background: transparent;
+}
+.btn-link {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font-weight: 400;
+  font-size: 12px;
+}
+.btn-link:hover {
+  text-decoration: underline;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

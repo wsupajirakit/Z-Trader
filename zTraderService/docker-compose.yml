@@ -1,0 +1,198 @@
+# zTraderService stack: the app and MongoDB, plus zTraderActor as an optional extra.
+#
+#   cp .env.compose.example .env.compose        # then fill in the secrets
+#   docker compose --env-file .env.compose up -d --build
+#   docker compose --env-file .env.compose --profile actor up -d --build   # with zTraderActor
+#
+# Always pass --env-file .env.compose. Without it, compose reads .env, which is the non-Docker dev
+# config, and the required secrets below make it stop with an error instead of starting.
+# Full guide, including Coolify: docs/deploy.md
+
+name: ztrader
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in .env.compose (openssl rand -hex 32)}
+      # read by docker/mongo/init-app-user.js on the first start (empty volume) only
+      MONGO_APP_DB: ${MONGO_APP_DB:-ztrader}
+      MONGO_APP_USER: ${MONGO_APP_USER:-ztrader}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env.compose (openssl rand -hex 32)}
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+      - ./docker/mongo/init-app-user.js:/docker-entrypoint-initdb.d/10-init-app-user.js:ro
+    # No `ports:`. MongoDB can only be reached from the internal `db` network.
+    networks:
+      - db
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # Authenticates as the app user, so "healthy" also means the init script has created it.
+      # $$ = expanded inside the container, so the password never appears in the compose config.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --norc --host 127.0.0.1
+          -u "$$MONGO_APP_USER" -p "$$MONGO_APP_PASSWORD" --authenticationDatabase "$$MONGO_APP_DB"
+          --eval "quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)" "$$MONGO_APP_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    logging: *logging
+
+  service:
+    build:
+      context: .
+      args:
+        VERSION: ${IMAGE_VERSION:-dev}
+        REVISION: ${GIT_REVISION:-unknown}
+    image: ztrader-service:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      # --- required ---
+      MONGO_URI: mongodb://${MONGO_APP_USER:-ztrader}:${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD in .env.compose}@mongo:27017/${MONGO_APP_DB:-ztrader}?authSource=${MONGO_APP_DB:-ztrader}
+      API_KEY: ${API_KEY:?set API_KEY in .env.compose (openssl rand -hex 32, at least 32 chars)}
+
+      # --- trading account: DEMO unless BOTH switches say LIVE ---
+      CTRADER_ACCOUNT_MODE: ${CTRADER_ACCOUNT_MODE:-DEMO}
+      CTRADER_ALLOW_LIVE: ${CTRADER_ALLOW_LIVE:-false}
+      CTRADER_HOST: ${CTRADER_HOST:-}
+      CTRADER_PORT: ${CTRADER_PORT:-5035}
+      APP_ID: ${APP_ID:-}
+      APP_SECRET: ${APP_SECRET:-}
+      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+      DEMO_ACCOUNT_ID: ${DEMO_ACCOUNT_ID:-}
+      LIVE_ACCOUNT_ID: ${LIVE_ACCOUNT_ID:-}
+
+      # --- HTTP / sessions ---
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-auto}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+
+      # --- optional integrations (empty = off) ---
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # --- storage: fixed to the volumes below ---
+      GOLD_ARCHIVE_DIR: /app/archive
+      GOLD_SETTINGS_FILE: /app/data/runtime-settings.json
+
+      # --- tuning knobs: passed through ONLY when set in the env file, so the code's defaults apply
+      # otherwise (an empty value would override a default). Most are also editable on the dashboard.
+      LOGIN_RATE_LIMIT_PER_MIN:
+      TRADE_INSTRUMENT:
+      GOLD_AUTOMATE_ENABLED:
+      GOLD_MODES:
+      GOLD_INSTRUMENTS:
+      GOLD_ENGINE:
+      GOLD_DATA_SOURCE:
+      GOLD_XAU_SYMBOL_ID:
+      GOLD_EXPORT_BASE_URL:
+      GOLD_PULL_KEY:
+      GOLD_SIZING:
+      GOLD_RISK_USD_PER_TRADE:
+      GOLD_RISK_TOLERANCE:
+      GOLD_BASE_LOT:
+      GOLD_MAX_LOT:
+      GOLD_DAILY_MAX_LOSS_USD:
+      GOLD_MAX_OPEN_POSITIONS:
+      GOLD_MAX_OPEN_POSITIONS_TOTAL:
+      GOLD_MIN_CONFIDENCE:
+      GOLD_LOSS_COOLDOWN_BARS:
+      GOLD_SCALP_MAX_PER_DAY:
+      GOLD_POSITION_RUN_UTC_HOURS:
+      GOLD_ARCHIVE_BARS:
+      GOLD_AI_MODE:
+      GOLD_AI_GATE:
+      GOLD_AI_MAX_CALLS_PER_DAY:
+      GOLD_AI_SHARE_PORTFOLIO:
+      GOLD_AI_MODEL:
+      GOLD_CLAUDE_MODEL:
+      GEMINI_MODEL:
+    volumes:
+      - archive:/app/archive
+      - data:/app/data
+    ports:
+      # Loopback by default, so only this machine can reach it. HTTP_BIND=0.0.0.0 opens it to the LAN.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-6500}:6500"
+    networks:
+      - db
+      - edge
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # time for enableShutdownHooks to close the cTrader socket and Mongo
+    stop_grace_period: 30s
+    logging: *logging
+
+  actor:
+    profiles: [actor]
+    build:
+      context: ${ACTOR_CONTEXT:-../zTraderActor}
+    image: ztrader-actor:${IMAGE_TAG:-local}
+    restart: unless-stopped
+    depends_on:
+      service:
+        condition: service_healthy
+    environment:
+      API_TRADER_URL: http://service:6500
+      API_KEY: ${API_KEY:?set API_KEY in .env.compose}
+      PORT: 3000
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      CTRADER_ACCOUNT_MODE: ${CTRADER_ACCOUNT_MODE:-DEMO}
+      DEMO_ACCOUNT_ID: ${DEMO_ACCOUNT_ID:-}
+      LOG_LEVEL:
+      SYMBOL:
+      STRATEGY_MODE:
+      MAX_POSITIONS:
+      TRADE_LOT_SIZE:
+      TRADE_AMOUNT_USD:
+    ports:
+      - "${HTTP_BIND:-127.0.0.1}:${ACTOR_PORT:-3000}:3000"
+    # edge only: the actor talks to `service` over HTTP and has no route to MongoDB
+    networks:
+      - edge
+    # the actor image runs node as PID 1 directly; a minimal init forwards signals and reaps zombies
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging: *logging
+
+networks:
+  # internal: no route in or out of the host. Only mongo and service are attached.
+  db:
+    internal: true
+  # outbound internet (cTrader, Yahoo, Telegram, Gemini) and the published HTTP ports
+  edge: {}
+
+volumes:
+  mongo-data:
+  mongo-config:
+  archive:
+  data:

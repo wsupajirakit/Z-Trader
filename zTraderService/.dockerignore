@@ -1,0 +1,55 @@
+# Build context for the zTraderService image. The Dockerfile copies only what it needs, but a small,
+# secret-free context keeps builds fast and makes sure nothing private can leak into a layer.
+
+# secrets: every env file except the documented examples
+.env
+.env.*
+!.env.example
+!.env.compose.example
+
+# VCS and editor/agent state
+.git
+.gitignore
+.gitattributes
+.claude
+.idea
+.vscode
+.DS_Store
+**/.DS_Store
+
+# stray folder in the repo root (literally named "~")
+~
+
+# dependencies are installed inside the image
+node_modules
+**/node_modules
+
+# build output is produced inside the image
+dist
+dist-*
+web/dist
+**/*.tsbuildinfo
+
+# runtime state (lives in volumes, never in the image)
+archive
+data
+backtest_runs
+
+# logs
+*.log
+logs
+npm-debug.log*
+
+# tests, local scratch scripts and tooling that the image never runs
+test
+coverage
+*.local.js
+scripts
+api-service-trader.postman_collection.json
+
+# container tooling itself (changing it should not bust the build cache)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+compose*.yml
+docker

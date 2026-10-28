@@ -1,0 +1,64 @@
+# compiled output
+/dist
+/node_modules
+/web/dist
+/web/node_modules
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+**/.DS_Store
+
+# Tests
+/coverage
+/web/coverage
+coverage/
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# dotenv environment variable files (examples stay tracked)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# nest.js
+.nestcli.json
+
+# runtime output: per-round JSON archive, trade log, local scratch
+# (anchored on purpose: web/src/features/dashboard/archive/ is source code)
+/archive
+/.dev-runtime
+order.log
+
+# baseline build สำหรับ regression test (test/instrument-regression.test.js, scripts/make-baseline.sh)
+/dist-baseline
+/.baseline-worktree
+
+# ค่าที่ตั้งจาก dashboard (runtime state ของแต่ละเครื่อง)
+/data
+
+# stray local tool folder in the repo root (a literal "~" directory)
+/~/

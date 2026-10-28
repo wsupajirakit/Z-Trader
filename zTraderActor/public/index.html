@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="th">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>zTraderActor — Gold Bot</title>
+        <link rel="stylesheet" href="/styles.css" />
+        <script src="/socket.io/socket.io.js" defer></script>
+        <script type="module" src="/app.js"></script>
+    </head>
+    <body>
+        <section id="loginView" class="card login" hidden>
+            <h2>zTraderActor — Sign in</h2>
+            <form id="loginForm" autocomplete="on">
+                <label for="loginUser">Username</label>
+                <input
+                    id="loginUser"
+                    name="username"
+                    autocomplete="username"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    required
+                    maxlength="32"
+                />
+                <label for="loginPass">Password</label>
+                <input
+                    id="loginPass"
+                    name="password"
+                    type="password"
+                    autocomplete="current-password"
+                    required
+                    maxlength="128"
+                />
+                <button class="btn-run" id="btnLogin" type="submit">Sign in</button>
+                <div class="msg" id="loginMsg" role="alert"></div>
+            </form>
+            <p class="muted note">Accounts are managed on the main zTraderService dashboard.</p>
+        </section>
+
+        <div id="appView" hidden>
+            <header>
+                <h1>zTraderActor</h1>
+                <span id="accBadge" class="badge demo">…</span>
+                <span id="engineBadge" class="badge engine">…</span>
+                <span class="muted"><span id="ctDot" class="dot off"></span>cTrader</span>
+                <span class="spacer"></span>
+                <span class="price" id="price">—</span>
+                <span id="userBadge" class="badge role"></span>
+                <button class="header-btn" id="btnLogout" type="button">Sign out</button>
+            </header>
+            <main>
+                <div>
+                    <div class="card">
+                        <h2>Gold Bot Control</h2>
+                        <div class="readonly" id="readonlyNote" hidden>
+                            Read-only: your role is viewer. Ask an admin for operator access to trade.
+                        </div>
+                        <label for="modeSel">โหมด (สำหรับ Run รอบเดียว)</label>
+                        <select id="modeSel"></select>
+                        <div class="modehint" id="modeHint"></div>
+                        <div class="row">
+                            <button class="btn-run op" id="btnRun" type="button">▶ Run รอบเดียว</button>
+                        </div>
+                        <label class="label-gap">Loop อัตโนมัติ — เลือกโหมด</label>
+                        <div class="checks" id="loopChecks"></div>
+                        <div class="row">
+                            <button class="btn-start op" id="btnStart" type="button">Start Auto Loop</button>
+                            <button class="btn-stop op" id="btnStop" type="button" hidden>Stop Auto Loop</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <h2>⚠️ ความเสี่ยงที่ยอมรับได้</h2>
+                        <div class="setgrid">
+                            <label
+                                >เสี่ยงต่อไม้ ($)<input class="op" type="number" id="s_risk" step="10" min="1"
+                            /></label>
+                            <label
+                                >ขาดทุนสูงสุด/วัน ($)<input class="op" type="number" id="s_daily" step="50" min="0"
+                            /></label>
+                            <label
+                                >ไม้ค้างพร้อมกัน<input class="op" type="number" id="s_maxpos" step="1" min="1" max="20"
+                            /></label>
+                            <label
+                                >scalp สูงสุด/วัน<input class="op" type="number" id="s_scalp" step="1" min="1" max="50"
+                            /></label>
+                            <label
+                                >confidence ขั้นต่ำ<input
+                                    class="op"
+                                    type="number"
+                                    id="s_conf"
+                                    step="1"
+                                    min="0"
+                                    max="10"
+                            /></label>
+                            <label
+                                >lot สูงสุด<input class="op" type="number" id="s_maxlot" step="0.01" min="0.01"
+                            /></label>
+                        </div>
+                        <div class="row">
+                            <button class="btn-save op" id="btnSave" type="button">💾 บันทึกค่าความเสี่ยง</button>
+                        </div>
+                        <div class="muted note" id="setNote"></div>
+                    </div>
+                    <div class="card">
+                        <h2>Live Stats <span class="muted" id="statTime"></span></h2>
+                        <div class="statgrid" id="statGrid"><div class="muted">กำลังโหลด…</div></div>
+                    </div>
+                    <div class="card">
+                        <h2>Open Positions (XAUUSD)</h2>
+                        <div id="positions" class="muted">—</div>
+                    </div>
+                    <div class="card arch">
+                        <h2>Archive ล่าสุด</h2>
+                        <div id="archList" class="muted">—</div>
+                    </div>
+                </div>
+                <div>
+                    <div class="card log-card">
+                        <h2>System Log</h2>
+                        <div id="log"></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </body>
+</html>

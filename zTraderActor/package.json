@@ -1,0 +1,36 @@
+{
+    "name": "ztraderactor",
+    "version": "2.0.0",
+    "private": true,
+    "description": "Operator dashboard and legacy strategy loop in front of zTraderService",
+    "license": "UNLICENSED",
+    "type": "module",
+    "main": "src/server.js",
+    "engines": {
+        "node": ">=24"
+    },
+    "scripts": {
+        "start": "node --env-file-if-exists=.env src/server.js",
+        "dev": "node --env-file-if-exists=.env --watch src/server.js",
+        "lint": "eslint . && prettier --check \"src/**\" \"test/**\" \"public/**\" \"*.{js,json,md}\"",
+        "format": "prettier --write \"src/**\" \"test/**\" \"public/**\" \"*.{js,json,md}\"",
+        "test": "node --test --test-timeout=30000 --test-reporter=spec \"test/**/*.test.js\""
+    },
+    "dependencies": {
+        "cookie": "^2.0.1",
+        "express": "^5.3.0",
+        "express-rate-limit": "^8.7.1",
+        "helmet": "^8.3.0",
+        "rss-parser": "^3.13.0",
+        "socket.io": "^4.8.4",
+        "socket.io-client": "^4.8.4",
+        "technicalindicators": "^3.1.0"
+    },
+    "devDependencies": {
+        "@eslint/js": "^10.0.1",
+        "eslint": "^10.13.0",
+        "eslint-config-prettier": "^10.1.8",
+        "globals": "^17.13.0",
+        "prettier": "^3.9.10"
+    }
+}

@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# local configuration and secrets (see .env.example)
+.env
+.env.*
+!.env.example
+
+# logs and tooling output
+npm-debug.log*
+coverage/
+.DS_Store

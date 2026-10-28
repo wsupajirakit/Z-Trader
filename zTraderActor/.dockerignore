@@ -1,0 +1,19 @@
+# secrets and VCS
+.env
+.env.*
+.git
+.gitignore
+.gitattributes
+
+# dependencies are installed inside the image
+node_modules
+
+# not needed at runtime
+test
+*.md
+eslint.config.js
+.prettierrc.json
+.prettierignore
+.dockerignore
+Dockerfile
+.DS_Store
