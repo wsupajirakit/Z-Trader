@@ -47,7 +47,7 @@ export function formatArgs(args) {
 export const tradeFeed = new EventEmitter();
 
 // Status lines written with stdout.write were only forwarded when they carried one of these tags.
-const STATUS_TAGS = ['[คิด]', '[รอ]', '[ทำ]'];
+const STATUS_TAGS = ['[Think]', '[Wait]', '[Exec]'];
 
 export const tradeLog = Object.freeze({
     info(...args) {

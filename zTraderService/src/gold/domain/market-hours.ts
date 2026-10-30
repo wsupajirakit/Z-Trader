@@ -28,16 +28,16 @@ export const METALS_HOURS: MarketHoursSpec = {
     openMin: 18 * 60,
     closeMin: 17 * 60,
     dailyBreak: [17 * 60, 18 * 60],
-    label_th: 'ตลาดทอง',
-    openText_th: 'อาทิตย์ 18:00 ET / จันทร์ 06:00 ไทย',
+    label_th: 'Gold market',
+    openText_th: 'Sun 18:00 ET / Mon 06:00 BKK',
 };
 
 export const FX_HOURS: MarketHoursSpec = {
     openMin: 17 * 60 + 5,
     closeMin: 16 * 60 + 55,
     dailyBreak: null,
-    label_th: 'ตลาดค่าเงิน',
-    openText_th: 'อาทิตย์ 17:05 ET / จันทร์ 05:05 ไทย',
+    label_th: 'FX market',
+    openText_th: 'Sun 17:05 ET / Mon 05:05 BKK',
 };
 
 export interface MarketStatus {
@@ -90,7 +90,7 @@ export function marketStatus(now = new Date(), hours: MarketHoursSpec = METALS_H
         const mins = DAY - min + hours.openMin; // เหลือของเสาร์ + ถึงเวลาเปิดวันอาทิตย์
         return mk({
             phase: 'weekend',
-            reason: `${hours.label_th}ปิดสุดสัปดาห์ (เสาร์) — เปิดอีกที${hours.openText_th}`,
+            reason: `${hours.label_th} closed for the weekend (Saturday) — reopens ${hours.openText_th}`,
             minutes_to_open: Math.round(mins),
             next_open_utc: nextOpenIso(now, mins),
         });
@@ -100,7 +100,7 @@ export function marketStatus(now = new Date(), hours: MarketHoursSpec = METALS_H
         const mins = hours.openMin - min;
         return mk({
             phase: 'weekend',
-            reason: `${hours.label_th}ยังปิด (สุดสัปดาห์) — เปิด ${openHHMM} ET อีก ${fmt(mins)}`,
+            reason: `${hours.label_th} still closed (weekend) — opens ${openHHMM} ET in ${fmt(mins)}`,
             minutes_to_open: mins,
             next_open_utc: nextOpenIso(now, mins),
         });
@@ -110,7 +110,7 @@ export function marketStatus(now = new Date(), hours: MarketHoursSpec = METALS_H
         const mins = DAY - min + DAY + hours.openMin; // เหลือของศุกร์ + เสาร์ + ถึงเวลาเปิดอาทิตย์
         return mk({
             phase: 'weekend',
-            reason: `${hours.label_th}ปิดสุดสัปดาห์แล้ว (ศุกร์ ${closeHHMM} ET) — เปิดอีกที${hours.openText_th}`,
+            reason: `${hours.label_th} closed for the weekend (Friday ${closeHHMM} ET) — reopens ${hours.openText_th}`,
             minutes_to_open: mins,
             next_open_utc: nextOpenIso(now, mins),
         });
@@ -124,7 +124,7 @@ export function marketStatus(now = new Date(), hours: MarketHoursSpec = METALS_H
             const be = `${String(Math.floor(bEnd / 60)).padStart(2, '0')}:${String(bEnd % 60).padStart(2, '0')}`;
             return mk({
                 phase: 'daily_break',
-                reason: `${hours.label_th}พักรายวัน ${bs}–${be} ET (rollover spread ถ่าง) — เปิดอีก ${fmt(mins)}`,
+                reason: `${hours.label_th} daily break ${bs}–${be} ET (rollover, wide spread) — reopens in ${fmt(mins)}`,
                 minutes_to_open: mins,
                 next_open_utc: nextOpenIso(now, mins),
             });
@@ -141,14 +141,14 @@ export function marketStatus(now = new Date(), hours: MarketHoursSpec = METALS_H
         const daysToFri = dow === 5 ? 0 : (5 - dow + 7) % 7;
         toClose = daysToFri * DAY + hours.closeMin - min;
     }
-    return mk({ open: true, phase: 'open', reason: `${hours.label_th}เปิด (${et} ET)`, minutes_to_close: toClose });
+    return mk({ open: true, phase: 'open', reason: `${hours.label_th} open (${et} ET)`, minutes_to_close: toClose });
 }
 
 function fmt(mins: number): string {
-    if (mins < 60) return `${mins} นาที`;
+    if (mins < 60) return `${mins} min`;
     const h = Math.floor(mins / 60),
         m = mins % 60;
-    return m ? `${h} ชม. ${m} นาที` : `${h} ชม.`;
+    return m ? `${h} h ${m} min` : `${h} h`;
 }
 
 function nextOpenIso(now: Date, minutesAhead: number): string {

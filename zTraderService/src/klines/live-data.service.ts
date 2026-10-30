@@ -61,7 +61,7 @@ export class LiveDataService {
         if (this.subscribedSymbols.has(symbolId)) return;
         if (this.seedingInProgress.has(symbolId)) return;
 
-        this.logger.log(`[ทำ] Starting Subscription for ${name} (ID: ${symbolId})`);
+        this.logger.log(`[act] Starting Subscription for ${name} (ID: ${symbolId})`);
         this.symbolMaxPositions.set(symbolId, maxPositions);
 
         try {
@@ -83,7 +83,7 @@ export class LiveDataService {
 
             // 1. Seed historical data for all required periods
             const strategy = this.getStrategyForSymbol(symbolId);
-            this.logger.log(`[คิด] Selected Strategy: ${strategy} for ${name}`);
+            this.logger.log(`[think] Selected Strategy: ${strategy} for ${name}`);
             let periods = [5, 7, 9, 10]; // Default HIGH_WIN_RATE
             if (strategy === 'SCALPER') periods = [5, 7, 9];
             else if (strategy === 'SONIC') periods = [5, 9];
@@ -155,7 +155,7 @@ export class LiveDataService {
                     period,
                     bars.filter((b) => b.close > 0),
                 );
-                this.logger.log(`[ทำ] Seeded ${bars.length} bars for ${this.getSymbolName(symbolId)} P=${period}`);
+                this.logger.log(`[act] Seeded ${bars.length} bars for ${this.getSymbolName(symbolId)} P=${period}`);
                 return true;
             }
             return false;

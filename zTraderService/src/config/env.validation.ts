@@ -67,8 +67,16 @@ export class EnvironmentVariables {
 
     @IsOptional()
     @IsString()
-    @MinLength(12)
+    @MinLength(9)
     BOOTSTRAP_ADMIN_PASSWORD?: string;
+
+    /**
+     * base URL of zTraderActor (the legacy Sonic/Scalper loop), e.g. http://localhost:3000. Unset = the
+     * dashboard's Actor panel reports "not configured". Checked to be an absolute http(s) URL below.
+     */
+    @IsOptional()
+    @IsString()
+    ACTOR_URL?: string;
 }
 
 const BOOL = new Set(['true', '1', 'yes']);
@@ -94,6 +102,10 @@ export function validateEnv(raw: Record<string, unknown>): Record<string, unknow
     }
     // a key pasted with a trailing newline or space must still meet the length rule on its real value
     if (typeof input.API_KEY === 'string') input.API_KEY = input.API_KEY.trim();
+    if (typeof input.ACTOR_URL === 'string') {
+        input.ACTOR_URL = input.ACTOR_URL.trim().replace(/\/+$/, '');
+        if (input.ACTOR_URL === '') delete input.ACTOR_URL;
+    }
     if (typeof input.CTRADER_HOST === 'string') {
         input.CTRADER_HOST = input.CTRADER_HOST.trim().toLowerCase();
         if (input.CTRADER_HOST === '') delete input.CTRADER_HOST;
@@ -110,6 +122,9 @@ export function validateEnv(raw: Record<string, unknown>): Record<string, unknow
     }
     if (!!env.BOOTSTRAP_ADMIN_USERNAME !== !!env.BOOTSTRAP_ADMIN_PASSWORD) {
         problems.push('BOOTSTRAP_ADMIN_USERNAME and BOOTSTRAP_ADMIN_PASSWORD must be set together');
+    }
+    if (env.ACTOR_URL !== undefined && !isHttpUrl(env.ACTOR_URL)) {
+        problems.push('ACTOR_URL must be an absolute http(s) URL, e.g. http://localhost:3000 (or unset)');
     }
     const host = input.CTRADER_HOST;
     if (host !== undefined && env.NODE_ENV !== 'test' && !(typeof host === 'string' && CTRADER_HOSTS.has(host))) {
@@ -132,4 +147,13 @@ export function validateEnv(raw: Record<string, unknown>): Record<string, unknow
     }
     // keep every other variable (GOLD_*, FX_*, …) available through ConfigService; the normalised values win
     return { ...raw, ...env };
+}
+
+function isHttpUrl(value: string): boolean {
+    try {
+        const u = new URL(value);
+        return (u.protocol === 'http:' || u.protocol === 'https:') && !!u.hostname && !u.username && !u.password;
+    } catch {
+        return false;
+    }
 }

@@ -84,6 +84,11 @@ services:
       BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
 
+      # --- zTraderActor bridge (dashboard -> Actor machine API) ---
+      # Set unconditionally: without `--profile actor` the `actor` host does not exist, and the dashboard's
+      # Actor panel simply reports "Actor unreachable" (reads stay 200, start/stop answer 502).
+      ACTOR_URL: ${ACTOR_URL:-http://actor:3000}
+
       # --- optional integrations (empty = off) ---
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}

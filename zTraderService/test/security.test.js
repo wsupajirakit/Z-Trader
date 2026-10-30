@@ -50,7 +50,7 @@ const throws = (fn) => { try { fn(); return false; } catch { return true; } };
     t('รหัสผิด → ไม่ผ่าน', !(await pw.verifyPassword('correct horse batterY', h1)));
     t('hash เพี้ยน/รูปแบบอื่น → ไม่ผ่าน (ไม่ throw)', !(await pw.verifyPassword('x', 'plain-text')) && !(await pw.verifyPassword('x', 'scrypt$99$8$1$aa$bb')));
     t('hash พารามิเตอร์เก่า → ต้อง rehash', pw.needsRehash('scrypt$14$8$1$AAAA$BBBB') && !pw.needsRehash(h1));
-    t('สั้นกว่า 12 → ไม่รับ', pw.passwordProblem('short-pass', 'bob') !== null);
+    t('shorter than 9 → rejected', pw.passwordProblem('shortpw!', 'bob') !== null);
     t('มีชื่อผู้ใช้อยู่ข้างใน (ไม่สนตัวพิมพ์) → ไม่รับ', pw.passwordProblem('xxBOBxx-long-enough', 'bob') !== null);
     t('ยาวพอและไม่มีชื่อ → รับ', pw.passwordProblem('a-long-enough-pass', 'bob') === null);
 
@@ -131,7 +131,7 @@ const throws = (fn) => { try { fn(); return false; } catch { return true; } };
         { source: '> quote', pubDate: '# heading', relevant: false, title: '- - - ทองพุ่ง' },
     ];
     const block = svc.newsBlock(evil).join('\n');
-    const head = '## ข่าว/ปฏิทินล่าสุด';
+    const head = '## Latest news/calendar';
     t('หัวข้อข่าวไม่พาขึ้นบรรทัดใหม่ได้', !block.split('\n').some((l, i) => i > 0 && !l.startsWith('- ')));
     t('ไม่มีหัวข้อ markdown ปลอมโผล่มาจากข่าว', block.split('\n').filter((l) => l.startsWith('## ')).length === 1);
     t('code fence ถูกตัด', !block.includes('```'));
@@ -152,7 +152,7 @@ const throws = (fn) => { try { fn(); return false; } catch { return true; } };
     t('ค่าตั้งต้น: ส่งไม้ค้าง + P&L ไปด้วย', on.includes('BUY 0.5 lots @ 4000') && on.includes('-420.50 USD'));
     t('ปิดสวิตช์: ไม่มีไม้ค้างใน prompt', !off.includes('BUY 0.5 lots @ 4000'));
     t('ปิดสวิตช์: ไม่มี P&L ใน prompt', !off.includes('420.50'));
-    t('ปิดสวิตช์แล้วยังส่งเพดานขนาดไม้ (ไม่ใช่ข้อมูลพอร์ต)', off.includes('เพดานขนาดไม้'));
+    t('ปิดสวิตช์แล้วยังส่งเพดานขนาดไม้ (ไม่ใช่ข้อมูลพอร์ต)', off.includes('Size cap'));
 
     console.log('\n=== 7. ห้ามมี key/token/รหัส หลุดเข้า prompt ที่ส่งออกไปผู้ให้บริการ AI ===');
     // ข้อมูลพอร์ต/ราคา ส่งได้ (จำเป็นต่อการวิเคราะห์) แต่ความลับต้องไม่หลุดออกไปเด็ดขาด
@@ -174,7 +174,7 @@ const throws = (fn) => { try { fn(); return false; } catch { return true; } };
     const TAx = {
         order_type: 'BUY_LIMIT', entry: 4001.5, sl: 3985, tp1: 4020, tp2: 4035, rr_tp1: 1.5,
         confidence: 7, size: 'half', playbook_ref: 'scalp #1', invalidation: '', valid_until_utc: null,
-        reason: 'r', analysis_summary_th: 's',
+        reason: 'r', analysis_summary: 's',
     };
     const allText = [
         leaky.buildSystemPrompt(XAUUSD_PROFILE, 'scalp', 4001.5),
@@ -219,7 +219,7 @@ const throws = (fn) => { try { fn(); return false; } catch { return true; } };
 
         const r1 = await mk(pos(2), ord(3)).getOpenPositions(XAUUSD_PROFILE, 41);
         t('ไม้เปิด 2 + ออเดอร์รอ 3 → นับได้ 5 (เดิมนับ 2 จึงทะลุเพดาน)', r1.count === 5, `${r1.count}`);
-        t('สรุปบอกว่าอันไหนเป็นออเดอร์รอ', (r1.summary.match(/\(รอ\)/g) || []).length === 3);
+        t('สรุปบอกว่าอันไหนเป็นออเดอร์รอ', (r1.summary.match(/\(pending\)/g) || []).length === 3);
 
         const r2 = await mk(pos(0), ord(0)).getOpenPositions(XAUUSD_PROFILE, 41);
         t('ไม่มีอะไรค้าง → 0', r2.count === 0);

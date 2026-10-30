@@ -68,7 +68,11 @@ export class Order {
     @Prop() rrTp1?: number;
     @Prop() confidence?: number;
     @Prop() archiveFile?: string; // archive/<mode>/<ts>_<mode>.json of the round
-    @Prop() analysisSummary?: string; // Thai TA summary at entry time
+    @Prop() analysisSummary?: string; // TA summary at entry time
+    // ---- configuration the order was placed under (see src/gold/records/round-context.ts) ----
+    @Prop({ index: true }) configHash?: string; // groups orders placed under identical settings
+    @Prop() riskProfile?: string; // risk profile name at entry ("custom" when none was applied)
+    @Prop({ type: Object }) context?: Record<string, unknown>; // full RoundTrace: config, guards, sizing, AI answer
 }
 
 export const OrderSchema = SchemaFactory.createForClass(Order);

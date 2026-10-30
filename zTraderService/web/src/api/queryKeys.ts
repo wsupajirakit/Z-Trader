@@ -15,6 +15,18 @@ export const qk = {
     all: ['audit'] as const,
     list: (limit: number) => ['audit', 'list', limit] as const,
   },
+  account: ['dashboard', 'account'] as const,
+  riskProfiles: ['risk-profiles'] as const,
+  chart: {
+    sources: (symbol: string) => ['chart', 'sources', symbol] as const,
+    bars: (symbol: string, source: string, tf: string) =>
+      ['chart', 'bars', symbol, source, tf] as const,
+  },
+  actor: {
+    all: ['actor'] as const,
+    state: ['actor', 'state'] as const,
+    logs: ['actor', 'logs'] as const,
+  },
   dashboard: {
     all: ['dashboard'] as const,
     status: ['dashboard', 'status'] as const,

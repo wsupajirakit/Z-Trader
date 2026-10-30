@@ -22,12 +22,12 @@ export class MarketFeed extends EventEmitter {
         });
 
         this.socket.on('connect', () => {
-            tradeLog.info('[ทำ] 🔌 Connected to Market Data Gateway');
+            tradeLog.info('[Exec] 🔌 Connected to Market Data Gateway');
             this.emit('connect');
         });
         this.socket.on('indicators', (payload) => this.emit('indicators', payload));
         this.socket.on('error', (err) => {
-            tradeLog.error('[รอ] Market Socket Error:', err);
+            tradeLog.error('[Wait] Market Socket Error:', err);
         });
     }
 

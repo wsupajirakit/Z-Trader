@@ -1,138 +1,74 @@
-import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { baseRoutes, session } from '../test/fixtures';
 import { json, stubFetch } from '../test/fetchStub';
-import {
-  instruments,
-  modes,
-  session,
-  settings,
-  status,
-} from '../test/fixtures';
-import { App } from './App';
-import { createQueryClient } from './queryClient';
-import { createAppRouter } from './router';
-import { installSessionHandlers } from './sessionHandlers';
+import { renderApp } from '../test/renderApp';
 
-const dashboard = {
-  'GET /api/dashboard/instruments': instruments,
-  'GET /api/dashboard/modes': modes,
-  'GET /api/dashboard/settings': settings(),
-  'GET /api/dashboard/positions': [],
-  'GET /api/dashboard/archive': [],
-  'GET /api/dashboard/activity': { latest_id: 0, entries: [] },
-  'GET /api/dashboard/ai/models': { current: 'gemini-3.5-flash', models: [] },
-};
-
-function start(path: string) {
-  const queryClient = createQueryClient();
-  const router = createAppRouter({
-    queryClient,
-    history: createMemoryHistory({ initialEntries: [path] }),
-  });
-  installSessionHandlers(router, queryClient);
-  render(<App queryClient={queryClient} router={router} />);
-  return router;
-}
-
-async function fillLogin(username: string, password: string) {
-  await userEvent.type(await screen.findByLabelText('ชื่อผู้ใช้'), username);
-  await userEvent.type(screen.getByLabelText('รหัสผ่าน'), password);
-  await userEvent.click(screen.getByRole('button', { name: 'เข้าสู่ระบบ' }));
-}
-
-describe('login', () => {
-  it('shows a generic message on 401 and the lockout time on 429', async () => {
-    let attempt = 0;
+describe('session flow', () => {
+  it('signed out → login page; a wrong password shows a generic message', async () => {
     stubFetch({
-      'GET /api/auth/me': () => json({ statusCode: 401 }, 401),
+      ...baseRoutes(),
       'POST /api/auth/login': () =>
-        ++attempt === 1
-          ? json({ statusCode: 401, message: 'Unauthorized' }, 401)
-          : json(
-              { statusCode: 429, message: 'locked', retryAfterSec: 600 },
-              429,
-            ),
+        json({ statusCode: 401, message: 'Unauthorized' }, 401),
     });
-    start('/login');
-    await fillLogin('alice', 'wrong-password');
+    renderApp('/bot', null);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Username'), 'dev');
+    await user.type(screen.getByLabelText('Password'), 'nope-nope-nope');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      '❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง',
+      'Wrong username or password',
     );
-    await userEvent.click(screen.getByRole('button', { name: 'เข้าสู่ระบบ' }));
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(
-        'ลองใหม่ในอีก 10 นาที',
-      );
-    });
   });
 
-  it('sends lower-cased username and lands on the forced change-password screen', async () => {
+  it('a lockout shows the minutes to wait', async () => {
+    stubFetch({
+      ...baseRoutes(),
+      'POST /api/auth/login': () =>
+        json(
+          { statusCode: 429, message: 'Too Many Requests', retryAfterSec: 600 },
+          429,
+        ),
+    });
+    renderApp('/login', null);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Username'), 'dev');
+    await user.type(screen.getByLabelText('Password'), 'whatever-123');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'try again in 10 minutes',
+    );
+  });
+
+  it('a successful login opens the page it came from', async () => {
     const calls = stubFetch({
-      'GET /api/auth/me': () => json({ statusCode: 401 }, 401),
-      'POST /api/auth/login': session('operator', { mustChangePassword: true }),
+      ...baseRoutes(),
+      'POST /api/auth/login': session('operator'),
     });
-    const router = start('/login');
-    await fillLogin('Operator', 'initial-password-1');
-    await screen.findByText(/ต้องตั้งรหัสผ่านใหม่ก่อนเข้าใช้งาน/);
-    expect(router.state.location.pathname).toBe('/change-password');
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+    const { router } = renderApp('/login?redirect=%2Fchart', null);
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Username'), ' Operator ');
+    await user.type(screen.getByLabelText('Password'), 'secret-pass-1');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/chart');
+    });
+    expect(calls.find((c) => c.url === '/api/auth/login')?.body).toEqual({
       username: 'operator',
-      password: 'initial-password-1',
+      password: 'secret-pass-1',
     });
   });
 
-  it('returns to the page that asked for the login', async () => {
-    let signedIn = false;
+  it('a 401 from any poll sends the user to the login page', async () => {
     stubFetch({
-      ...dashboard,
-      'GET /api/auth/me': () =>
-        signedIn ? json(session('admin')) : json({}, 401),
-      'POST /api/auth/login': () => {
-        signedIn = true;
-        return json(session('admin'));
-      },
-      'GET /api/dashboard/status': status(),
-      'GET /api/users': [],
-    });
-    const router = start('/admin/users');
-    await fillLogin('admin', 'a-long-password');
-    await screen.findByText('ผู้ใช้ทั้งหมด');
-    expect(router.state.location.pathname).toBe('/admin/users');
-  });
-});
-
-describe('session loss', () => {
-  it('a 401 from any poll sends the user to /login', async () => {
-    stubFetch({
-      ...dashboard,
-      'GET /api/auth/me': session('viewer'),
+      ...baseRoutes(),
       'GET /api/dashboard/status': () =>
         json({ statusCode: 401, message: 'Unauthorized' }, 401),
     });
-    const router = start('/');
-    await screen.findByText('🔒 zTrader Dashboard');
-    expect(router.state.location.pathname).toBe('/login');
-    expect(router.state.location.search).toEqual({ redirect: '/' });
-  });
-
-  it('a 403 PASSWORD_CHANGE_REQUIRED sends the user to change the password', async () => {
-    let mustChange = false;
-    stubFetch({
-      ...dashboard,
-      'GET /api/auth/me': () =>
-        json(session('viewer', { mustChangePassword: mustChange })),
-      'GET /api/dashboard/status': () => {
-        mustChange = true;
-        return json(
-          { statusCode: 403, message: 'PASSWORD_CHANGE_REQUIRED' },
-          403,
-        );
-      },
+    const { router } = renderApp('/bot', 'operator');
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/login');
     });
-    const router = start('/');
-    await screen.findByText(/ต้องตั้งรหัสผ่านใหม่ก่อนเข้าใช้งาน/);
-    expect(router.state.location.pathname).toBe('/change-password');
   });
 });

@@ -131,7 +131,10 @@ export type GoldOrderType =
 export type GoldSize = 'quarter' | 'half' | 'full';
 
 export interface GoldAiAssist {
-  verdict: 'CONFIRM' | 'ADJUST' | 'VETO';
+  verdict?: 'CONFIRM' | 'ADJUST' | 'VETO';
+  /** lead / AI-only proposals */
+  action?: 'TRADE' | 'NO_TRADE';
+  playbook_ref?: string;
   entry: number | null;
   sl: number | null;
   tp1: number | null;
@@ -139,8 +142,13 @@ export interface GoldAiAssist {
   size: GoldSize;
   confidence: number;
   key_levels: string;
-  risk_note_th: string;
-  reason_th: string;
+  reason?: string;
+  risk_note?: string;
+  news_risk?: string;
+  invalidation?: string;
+  /** names used by servers before the English rename */
+  reason_th?: string;
+  risk_note_th?: string;
   news_risk_th?: string;
   invalidation_th?: string;
 }
@@ -158,7 +166,9 @@ export interface GoldDecision {
   invalidation: string;
   playbook_ref: string;
   reason: string;
-  analysis_summary_th: string;
+  analysis_summary?: string;
+  /** older servers */
+  analysis_summary_th?: string;
   ai_assist?: GoldAiAssist;
   near_miss?: boolean;
   near_miss_rule?: string;
@@ -242,7 +252,9 @@ export interface ActivityResponse {
 
 // ───────────────────────────── dashboard: settings / AI ─────────────────────────────
 
-export type AiMode = 'off' | 'assist' | 'lead';
+export type AiMode = 'off' | 'assist' | 'lead' | 'ai_only';
+export type AiProvider = 'gemini' | 'claude';
+export type AiStrictness = 'normal' | 'strict' | 'very_strict' | 'maximum';
 export type AiGate = 'near_miss' | 'always' | 'setup_only';
 export type ThinkingLevel = 'minimal' | 'low' | 'medium' | 'high';
 
@@ -257,6 +269,7 @@ export interface GeminiConfig {
   timeout_ms: number;
   has_key: boolean;
   api: string;
+  strictness?: AiStrictness;
 }
 
 export interface AiCallUsage {
@@ -282,7 +295,16 @@ export interface BotSettings {
   loss_cooldown_bars: number;
   sizing: string;
   ai_assist: boolean;
+  /** mode in effect (off when the provider key is missing) */
   ai_mode: AiMode;
+  /** mode chosen on the dashboard */
+  ai_mode_selected?: AiMode;
+  ai_provider?: AiProvider;
+  ai_strictness?: AiStrictness;
+  ai_strictness_min_confidence?: number | null;
+  claude?: { model: string; effort: string; has_key: boolean };
+  engine?: 'ta' | 'ai';
+  risk_profile?: RiskProfileState | null;
   ai_gate: AiGate;
   ai_max_calls_per_day: number;
   ai_calls: AiCallUsage;
@@ -305,6 +327,8 @@ export interface RiskSettingsUpdate {
   max_lot_eurusd?: number;
   max_lot_gbpusd?: number;
   max_lot_usdjpy?: number;
+  max_lot_xauusd?: number;
+  loss_cooldown_bars?: number;
 }
 
 export interface AiSettingsUpdate {
@@ -312,6 +336,7 @@ export interface AiSettingsUpdate {
   ai_gate?: AiGate;
   ai_thinking?: ThinkingLevel;
   ai_model?: string;
+  ai_strictness?: AiStrictness;
 }
 
 export type SettingsUpdate = RiskSettingsUpdate & AiSettingsUpdate;
@@ -319,11 +344,19 @@ export type SettingsUpdate = RiskSettingsUpdate & AiSettingsUpdate;
 export interface AiModel {
   id: string;
   label: string;
-  out: number;
+  out?: number;
+  provider?: AiProvider;
+  /** AI modes this model can serve */
+  modes?: AiMode[];
 }
 
 export interface AiModelsResponse {
   current: string;
+  provider?: AiProvider;
+  gemini_current?: string;
+  claude_current?: string;
+  has_gemini_key?: boolean;
+  has_claude_key?: boolean;
   models: AiModel[];
   error?: string;
 }
@@ -416,6 +449,10 @@ export interface TradeRow {
   entry_reason: string | null;
   playbook: string | null;
   archive_file: string | null;
+  /** risk profile at entry ("custom" when none was applied; null for orders older than profiles) */
+  risk_profile?: string | null;
+  /** id of the exact configuration at entry; the full snapshot is in the archive round and the order */
+  config_hash?: string | null;
   /** Not sent today (history is per active instrument); the UI falls back to `HistoryResponse.instrument`. */
   instrument?: string;
 }
@@ -439,3 +476,139 @@ export interface HistoryResponse {
   by_side: Record<'BUY' | 'SELL', TradeAgg>;
   trades: TradeRow[];
 }
+
+// ───────────────────────────── account ─────────────────────────────
+
+export interface AccountSummary {
+  available: boolean;
+  accountId: number | null;
+  mode: string;
+  balance: number | null;
+  currency: 'USD';
+  leverage: number | null;
+  updatedAt: string | null;
+  error?: string;
+}
+
+// ───────────────────────────── risk profiles ─────────────────────────────
+
+export type AmountUnit = 'usd' | 'pct';
+export interface Amount {
+  unit: AmountUnit;
+  value: number;
+}
+
+export interface RiskProfileValues {
+  risk_per_trade: Amount;
+  daily_max_loss: Amount;
+  max_open_positions: number;
+  max_open_positions_total: number;
+  min_confidence: number;
+  loss_cooldown_bars: number;
+  scalp_max_per_day: number;
+  max_lot?: Partial<Record<string, number>>;
+}
+
+export interface RiskProfile {
+  id: string;
+  name: string;
+  description: string;
+  builtIn: boolean;
+  values: RiskProfileValues;
+  /** settings for the current balance; null when a % needs a balance that is not available */
+  resolved: Record<string, number> | null;
+  createdBy: string | null;
+  updatedAt: string | null;
+}
+
+export interface RiskProfileState {
+  id: string;
+  name: string;
+  modified: boolean;
+  changed: string[];
+}
+
+export interface RiskProfilesResponse {
+  balance: number | null;
+  active: RiskProfileState | null;
+  profiles: RiskProfile[];
+}
+
+export interface RiskProfileInput {
+  name: string;
+  description?: string;
+  values: RiskProfileValues;
+}
+
+export interface ApplyProfileResult {
+  profile: { id: string; name: string };
+  applied: Record<string, number>;
+  settings: BotSettings;
+}
+
+// ───────────────────────────── chart ─────────────────────────────
+
+export type ChartTimeframe = 'M1' | 'M5' | 'M15' | 'M30' | 'H1' | 'H4' | 'D1';
+
+export interface ChartSource {
+  id: string;
+  label: string;
+  kind: 'broker' | 'tradingview';
+}
+
+export interface ChartSourcesResponse {
+  symbol: string;
+  sources: ChartSource[];
+}
+
+export interface ChartBar {
+  /** unix seconds, UTC */
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface ChartBarsResponse {
+  symbol: string;
+  source: string;
+  tf: ChartTimeframe;
+  bars: ChartBar[];
+}
+
+// ───────────────────────────── strategy (zTraderActor) ─────────────────────────────
+
+export interface ActorSymbolLive {
+  symbol: string;
+  price: number | null;
+  rsi: number | null;
+  ema: number | null;
+  lastUpdate: string | null;
+  hasReceived: boolean;
+}
+
+export type ActorState =
+  | {
+      available: true;
+      isRunning: boolean;
+      symbols: string[];
+      mode: string;
+      maxPositions: number;
+      modes: string[];
+      symbolsLive: ActorSymbolLive[];
+    }
+  | { available: false; reason: string };
+
+export interface ActorLogEntry {
+  id: number;
+  ts: string;
+  type: 'info' | 'error';
+  message: string;
+  channel: 'order' | 'system';
+}
+
+export type ActorLogs =
+  | { latestId: number; entries: ActorLogEntry[] }
+  | { available: false; reason: string };

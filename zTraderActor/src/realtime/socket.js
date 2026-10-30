@@ -2,15 +2,13 @@ import { Server } from 'socket.io';
 import { isSecureRequest, readSessionToken } from '../auth/cookies.js';
 import { isSameOrigin, requestHost } from '../auth/middleware.js';
 import { authorize } from '../auth/roles.js';
+import { channelOf } from '../logging/channels.js';
 import { log } from '../logging/logger.js';
 import { isValidSymbol, MAX_SYMBOLS, normalizeMode } from '../strategies/modes.js';
 
 /** Every socket that passed the handshake joins this room; nothing is sent to the whole server. */
 export const AUTH_ROOM = 'authenticated';
 const sessionRoom = (session) => `session:${session.id}`;
-
-// Same split the old console interceptor used: order-ish lines go to the orders pane.
-const ORDER_KEYWORDS = ['Trade executed', '[ทำ] เงื่อนไขครบ', 'กำลังส่งคำสั่ง', 'BUY', 'SELL', 'Order Placed'];
 
 /** @returns {{ value: { symbols: string[], mode: string } } | { error: string }} */
 export function parseStartPayload(data) {
@@ -109,7 +107,8 @@ export function attachRealtime({ httpServer, sessions, revalidator, engine, trad
     const onState = (state) => room().emit('stateUpdate', state);
     const onMarket = (update) => room().emit('marketUpdate', update);
     const onEntry = ({ message, type }) => {
-        if (ORDER_KEYWORDS.some((kw) => message.includes(kw))) room().emit('orderLog', { message, type: 'success' });
+        // order-ish lines go to the orders pane (see logging/channels.js)
+        if (channelOf(message) === 'order') room().emit('orderLog', { message, type: 'success' });
         else room().emit('log', { message, type });
     };
     const onSessionEnd = (session) => io.in(sessionRoom(session)).disconnectSockets(true);

@@ -7,6 +7,9 @@ zTraderActor is a small Node.js service with two jobs:
 2. **Legacy Sonic/Scalper strategy loop.** The `StrategyController` polling loop, started and stopped
    over socket.io. It reads market data from zTraderService (`/api/v1/klines`, socket.io `/klines`) and
    sends orders to `POST /orders`.
+3. **Machine API for the service dashboard.** `GET /api/machine/engine`, `POST /api/machine/engine/start` and
+   `/stop`, and `GET /api/machine/logs` (ring buffer of the trade feed) require the shared `x-api-key`. The
+   zTraderService Strategy page uses them through its `/api/actor/*` bridge (`ACTOR_URL` on the service).
 
 Users, passwords, lockout and the audit log all live in zTraderService. This app checks credentials
 against the service and keeps its own short-lived sessions.
@@ -19,9 +22,10 @@ src/
   actor.js               composition root (HTTP + socket.io + sessions), used by server.js and tests
   config/env.js          reads and validates the environment once at boot
   auth/                  SessionStore, cookies, CredentialVerifier (service verify call), roles, middleware
-  http/                  Express app, routes (auth, gold proxy), input validation
+  http/                  Express app, routes (auth, gold proxy, machine API), input validation
   realtime/socket.js     socket.io: handshake auth, trading commands, log/market broadcast
-  logging/logger.js      system log (stdout only) and trade feed (stdout + dashboard)
+  logging/               logger.js: system log (stdout) and trade feed (stdout + dashboards);
+                         LogBuffer.js: last 500 trade-feed lines for the machine API; channels.js: order/system split
   services/              ServiceClient (fetch), Klines/News/Indicator services, TradeDispatcher,
                          MarketFeed (socket.io client), TradingEngine (the polling loop)
   strategies/            StrategyController and the list of strategy modes

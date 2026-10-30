@@ -12,9 +12,9 @@ const apply = (ta, ai, rr) => GoldAutomateService.prototype['applyAssist'].call(
 
 const TA = { order_type:'BUY_LIMIT', entry:4000, sl:3980, tp1:4040, tp2:4060, rr_tp1:2,
              confidence:7, size:'full', reason:'TA setup', playbook_ref:'swing #1',
-             invalidation:'', valid_until_utc:null, analysis_summary_th:'' };
+             invalidation:'', valid_until_utc:null, analysis_summary:'' };
 const A = (o) => ({ verdict:'ADJUST', entry:null, sl:null, tp1:null, tp2:null,
-                    size:'full', confidence:8, key_levels:'', risk_note_th:'', reason_th:'', ...o });
+                    size:'full', confidence:8, key_levels:'', risk_note:'', reason:'', ...o });
 let pass = 0, fail = 0;
 const t = (name, cond) => { cond ? (pass++, console.log('  ✓', name)) : (fail++, console.log('  ✗', name)); };
 
@@ -33,7 +33,7 @@ const bad = apply(TA, A({ entry:4000, sl:4050 }), 1.5);
 t('SL ผิดฝั่ง = ใช้ของ TA', bad.sl === 3980);
 const thin = apply(TA, A({ entry:4000, sl:3980, tp1:4005 }), 1.5);
 t('R:R ต่ำกว่าขั้นต่ำ = ไม่เข้า', thin.order_type === 'NO_TRADE');
-const veto = apply(TA, A({ verdict:'VETO', reason_th:'ใกล้ข่าว' }), 1.5);
+const veto = apply(TA, A({ verdict:'VETO', reason:'ใกล้ข่าว' }), 1.5);
 t('VETO = ไม่เข้า', veto.order_type === 'NO_TRADE' && veto.entry === null);
 
 console.log('ราคาสดใช้ไม่ได้ = ไม่รับระดับใหม่:');

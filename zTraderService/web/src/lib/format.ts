@@ -1,9 +1,4 @@
-/** Number / text formatters ported from public/index.html (behaviour kept identical). */
-
-/**
- * `fmtP` — a price with the instrument's decimals (gold 2 · EURUSD 5 · USDJPY 3).
- * Non-numeric values come back as-is; null/undefined become "—".
- */
+/** price with the instrument's decimals; null/undefined → "—" */
 export function fmtP(
   v: number | string | null | undefined,
   digits: number,
@@ -14,24 +9,24 @@ export function fmtP(
   return n.toFixed(digits);
 }
 
-/** `fmtPx` — like `fmtP` but anything that is not a number (incl. NaN) is "—". */
-export function fmtPx(v: number | null | undefined, digits: number): string {
-  return v === null || v === undefined || Number.isNaN(v)
-    ? '—'
-    : v.toFixed(digits);
-}
-
-/** Signed money with two decimals: `+12.30`, `-4.00`, `+0.00`. */
+/** signed money with two decimals: +12.30 / -4.00 */
 export function money(v: number): string {
   return (v >= 0 ? '+' : '') + v.toFixed(2);
 }
 
-/** "pos" for ≥ 0, "neg" otherwise (table/summary colouring). */
-export function signClass(v: number): 'pos' | 'neg' {
-  return v >= 0 ? 'pos' : 'neg';
+/** USD amount with grouping: $1,234.50 */
+export function usd(v: number | null | undefined, decimals = 2): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+  return (
+    (v < 0 ? '-$' : '$') +
+    Math.abs(v).toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    })
+  );
 }
 
-/** Minutes → "h:mm" (market badge countdown). Missing values count as 0. */
+/** minutes → "h:mm" */
 export function fmtHM(minutes: number | null | undefined): string {
   const total = minutes ?? 0;
   const h = Math.floor(total / 60);
@@ -39,19 +34,47 @@ export function fmtHM(minutes: number | null | undefined): string {
   return `${h}:${String(m).padStart(2, '0')}`;
 }
 
-/** Cut to `max` characters and add "…" when longer. */
 export function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
-/** `1234.5` → "1,234.5" (en-US grouping, as the original used for units/lot). */
 export function fmtInt(n: number): string {
   return n.toLocaleString('en-US');
 }
 
-/** Bytes → "12.3 KB". */
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** ISO → local date + time; "—" for null */
+export function dateTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString('en-GB', { hour12: false });
+}
+
+/** ISO → local HH:mm:ss */
+export function timeOf(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleTimeString('en-GB', { hour12: false });
+}
+
+/** "MM-DD HH:mm" from an ISO string, in UTC */
+export function closedShort(iso: string): string {
+  return iso.slice(5, 16).replace('T', ' ');
+}
+
+/** seconds → "4m 05s" / "1h 02m" */
+export function fmtAge(sec: number): string {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600)
+    return `${Math.floor(sec / 60)}m ${String(Math.round(sec % 60)).padStart(2, '0')}s`;
+  return `${Math.floor(sec / 3600)}h ${String(Math.floor((sec % 3600) / 60)).padStart(2, '0')}m`;
 }

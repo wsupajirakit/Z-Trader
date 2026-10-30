@@ -7,8 +7,14 @@ import { defineConfig } from 'vite';
 // and the session cookie + Origin check behave exactly as in production.
 const backend = 'http://localhost:6500';
 
+// The server swaps this placeholder for a fresh per-request nonce (src/common/http/web-app.ts).
+// Vite writes it on the tags it emits and as <meta property="csp-nonce">, which the Emotion
+// cache reads so MUI's injected <style> tags satisfy the strict style-src CSP.
+const CSP_NONCE_PLACEHOLDER = '__CSP_NONCE__';
+
 export default defineConfig({
   plugins: [react()],
+  html: { cspNonce: CSP_NONCE_PLACEHOLDER },
   server: {
     proxy: {
       '/api': { target: backend, changeOrigin: false },
@@ -21,6 +27,7 @@ export default defineConfig({
     sourcemap: false,
     // Emit every asset as a file (no data: URIs) so a strict production CSP holds.
     assetsInlineLimit: 0,
+    chunkSizeWarningLimit: 1500,
   },
   test: {
     environment: 'jsdom',

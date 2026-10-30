@@ -90,7 +90,7 @@ describe('login, /me, logout', () => {
         const r = await h.request('/login', { method: 'POST', body: { username: 'newbie', password: PASSWORD } });
         assert.equal(r.status, 403);
         assert.equal(r.body.error, 'PASSWORD_CHANGE_REQUIRED');
-        assert.match(r.body.message, /change your password on the main zTraderService dashboard/);
+        assert.match(r.body.message, /change your password on the main Z Trader dashboard/);
         assert.equal(r.res.headers.get('set-cookie'), null);
         assert.ok(![...h.actor.sessions.sessions.values()].some((s) => s.user.username === 'newbie'));
     });

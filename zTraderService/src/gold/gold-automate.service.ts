@@ -12,6 +12,15 @@ import { GoldBuilderService } from './data/gold-builder.service';
 import { GoldTaService } from './analysis/gold-ta.service';
 import { GoldArchiveService } from './records/gold-archive.service';
 import { GoldActivityService } from './records/gold-activity.service';
+import { DealCacheService } from './records/deal-cache.service';
+import {
+    appVersion,
+    newTrace,
+    withoutSecrets,
+    type ConfigSnapshot,
+    type RoundSizing,
+    type RoundTrace,
+} from './records/round-context';
 import { INTERVAL_MS } from './domain/gold-modes';
 import { marketStatus } from './domain/market-hours';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -23,6 +32,7 @@ import {
     InstrumentProfile,
     INSTRUMENTS,
     INSTRUMENT_KEYS,
+    type InstrumentKey,
     isInstrumentKey,
     fmtPrice,
     roundPrice,
@@ -31,6 +41,20 @@ import {
 } from './domain/instruments';
 import { errorMessage } from '../common/utils/errors';
 import { DomainError } from './domain/domain-error';
+import { AI_STRICTNESS_LEVELS, type AiStrictness, STRICTNESS_MIN_AI_CONFIDENCE } from './ai/ai-strictness';
+
+/** off = TA only · assist = TA, then the AI confirms/vetoes · lead = assist + the AI proposes when TA finds nothing · ai_only = the AI decides every round */
+export const AI_MODES = ['off', 'assist', 'lead', 'ai_only'] as const;
+export type AiMode = (typeof AI_MODES)[number];
+export type AiProvider = 'gemini' | 'claude';
+
+/** marker of the risk profile applied last, persisted with the other overrides (GOLD_RISK_PROFILE) */
+export interface RiskProfileMarker {
+    id: string;
+    name: string;
+    /** the settings body the profile resolved to when applied; any later difference = "modified" */
+    applied: Record<string, number>;
+}
 
 interface ModeConfig {
     periodMin: number; // bar period the loop is aligned to (XAU_AUTOMATE.md §7)
@@ -64,13 +88,14 @@ interface PendingApproval {
     decision: GoldDecision;
     sizeCap: GoldSize | null;
     createdAt: number;
+    /** configuration of the round that parked it; carried onto the order when it is fired */
+    trace?: RoundTrace;
 }
 
 const PENDING_TTL_MS = 10 * 60_000; // decision goes stale after 10 minutes
-const PNL_CACHE_TTL_MS = 10 * 60_000; // ใช้ P&L ที่แคชไว้ได้ไม่เกิน 10 นาที เมื่อ deal list ล่ม
-const TA_MAX_CONFIDENCE = 8; // เพดานคะแนนที่ TA engine สร้างได้จริง (ดู gold-ta.service.ts confBase)
-const STALE_TICK_MS = 90_000; // ตลาดเปิดแต่ราคาไม่ขยับเกิน 90 วิ = subscription เงียบ
-const SPOT_RESUB_COOLDOWN_MS = 60_000; // กันสมัครรับราคาใหม่รัว ๆ ทุก tick
+const TA_MAX_CONFIDENCE = 8; // max confidence the TA engine can actually produce (see gold-ta.service.ts confBase)
+const STALE_TICK_MS = 90_000; // market open but price unchanged for 90 s = silent subscription
+const SPOT_RESUB_COOLDOWN_MS = 60_000; // avoid re-subscribing on every tick
 
 @Injectable()
 export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
@@ -85,24 +110,24 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * ผูก day ไว้ด้วย พอข้ามวัน UTC ให้ถือว่าหมดอายุเอง ไม่ค้างข้ามวัน
      */
     private dailyStopReset: { day: string; ts: number } | null = null;
-    private lastSpotResubAt = new Map<string, number>(); // key = instrument -> เวลาที่พยายามสมัครล่าสุด (กันยิงถี่ต่อตราสาร)
+    private lastSpotResubAt = new Map<string, number>(); // key = instrument -> last resubscribe attempt (throttle per instrument)
     // นับ scalp ต่อวัน แยกตามตราสาร (key = instrument)
     private scalpCount = new Map<string, { day: string; count: number }>();
     // สมัครรับราคาสดของหลายตราสารพร้อมกันได้ (loop วนหลายตราสาร) — key = instrument key
     private spotSubscribed = new Map<string, boolean>();
-    private spotSymbolId = new Map<string, number>(); // instrument key -> symbolId ที่สมัครรับราคาสดอยู่
+    private spotSymbolId = new Map<string, number>(); // instrument key -> symbolId subscribed for live prices
     private lastHeartbeat = 0;
     private currentMode: GoldMode | null = null;
-    private marketWasOpen = new Map<string, boolean>(); // key = instrument -> ตลาดตราสารนั้นเปิดอยู่ไหมในรอบก่อน (แต่ละตราสารเวลาตลาดต่างกัน)
+    private marketWasOpen = new Map<string, boolean>(); // key = instrument -> was that market open last tick (hours differ per instrument)
     // state/pending/running แยกตามตราสาร: key = `${instrument}:${mode}` — สลับตราสารแล้วของเดิมไม่หาย
     private running = new Set<string>();
     private state = new Map<string, ModeState>();
     private pending = new Map<string, PendingApproval>();
-    private lastPositionRunDate = new Map<string, string>(); // key = instrument -> วันที่รัน position ล่าสุด
+    private lastPositionRunDate = new Map<string, string>(); // key = instrument -> date of the last position run
     // runtime overrides (from POST /gold/automate) — null = follow env
     private runtimeEnabled: boolean | null = null;
     private runtimeModes: GoldMode[] | null = null;
-    private runtimeInstruments: string | null = null; // comma-separated keys, null = ตราสาร active ตัวเดียว
+    private runtimeInstruments: string | null = null; // comma-separated keys, null = only the active instrument
 
     constructor(
         private configService: ConfigService,
@@ -118,6 +143,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         private goldArchiveService: GoldArchiveService,
         private activity: GoldActivityService,
         private instruments: GoldInstrumentService,
+        private deals: DealCacheService,
     ) {}
 
     /** โปรไฟล์ตราสารที่เลือกอยู่ (ทอง/คู่เงิน) */
@@ -149,8 +175,11 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * (ราคาสด/state/pending ของตราสารเดิมยังเก็บไว้ สลับกลับมาได้)
      */
     setInstrument(symbol: string) {
-        if (this.isEnabled()) throw new DomainError('หยุด Auto Loop ก่อน แล้วค่อยเปลี่ยนตราสาร');
-        if (this.running.size) throw new DomainError('กำลังวิเคราะห์รอบอยู่ — รอให้จบก่อนเปลี่ยนตราสาร');
+        if (this.isEnabled()) throw new DomainError('Stop the Auto Loop before changing the instrument');
+        if (this.running.size)
+            throw new DomainError(
+                'An analysis round is running — wait for it to finish before changing the instrument',
+            );
         const before = this.profile.key;
         const p = this.instruments.setActive(symbol);
         if (p.key !== before) {
@@ -159,7 +188,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             // และราคา/สถานะของตราสารเดิมยังอยู่ครบ สลับกลับมาใช้ต่อได้ทันทีตามคอมเมนต์ข้างบน
             this.activity.push(
                 'warn',
-                `${p.emoji} เปลี่ยนตราสารเป็น ${p.key} (${p.name_th}) — ข้อมูล/playbook/AI prompt/ข่าว/ชั่วโมงตลาด ปรับตามแล้ว`,
+                `${p.emoji} Instrument changed to ${p.key} (${p.name_th}) — data/playbook/AI prompt/news/market hours updated accordingly`,
             );
         }
         return this.getStatus();
@@ -179,7 +208,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         // เก็บ tick ของทุกตราสารที่ระบบรู้จัก (ไม่ใช่กรองทิ้งเฉพาะตัวที่ active) — loop
         // วนหลายตราสารพร้อมกัน แต่ละตัวต้องมีราคาสดของตัวเองไว้ใช้ตอนวิเคราะห์
         const prof = this.instruments.profileBySymbolId(symbolId);
-        if (!prof) return; // symbol ที่ระบบไม่รู้จัก (เช่น klines gateway subscribe เพิ่ม) ไม่เกี่ยวกับ gold bot
+        if (!prof) return; // unknown symbol (e.g. extra klines gateway subscription), not for the gold bot
         const bid = num(payload.bid) / 100_000;
         const ask = num(payload.ask) / 100_000;
         if (bid > 0) this.ticks.set(prof.key, { bid, ask: ask || bid, at: Date.now() });
@@ -228,7 +257,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const last = this.lastSpotResubAt.get(p.key) ?? 0;
             if (Date.now() - last > SPOT_RESUB_COOLDOWN_MS) {
                 this.lastSpotResubAt.set(p.key, Date.now());
-                this.activity.push('error', `หา symbolId ของ ${p.key} ไม่ได้: ${errorMessage(e)}`);
+                this.activity.push('error', `Could not find the symbolId for ${p.key}: ${errorMessage(e)}`);
             }
             return;
         }
@@ -244,10 +273,12 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             Date.now() - (this.lastSpotResubAt.get(p.key) ?? 0) > SPOT_RESUB_COOLDOWN_MS;
 
         if (stale) {
-            this.logger.warn(`ราคาสด ${p.key} ค้าง ${Math.round(tickAge / 60_000)} นาที — รื้อ subscription สมัครใหม่`);
+            this.logger.warn(
+                `Live price for ${p.key} stale for ${Math.round(tickAge / 60_000)} min — tearing down and re-subscribing`,
+            );
             this.activity.push(
                 'warn',
-                `⚠ ราคาสด ${p.key} ค้าง ${Math.round(tickAge / 60_000)} นาที — กำลังสมัครรับราคาใหม่`,
+                `⚠ Live price for ${p.key} stale for ${Math.round(tickAge / 60_000)} min — re-subscribing to prices`,
             );
             // ต้อง unsubscribe ก่อน ไม่งั้น server ตอบ ALREADY_SUBSCRIBED แล้วราคาก็ยังค้าง
             try {
@@ -264,7 +295,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             await this.ctraderService.subscribeSpots(symbolId, 'gold');
             this.spotSubscribed.set(p.key, true);
             this.spotSymbolId.set(p.key, symbolId);
-            this.activity.push('ok', `สมัครรับราคา ${p.key} สดจาก cTrader แล้ว`);
+            this.activity.push('ok', `Subscribed to live ${p.key} prices from cTrader`);
         } catch (e) {
             // already subscribed by the klines gateway = fine, ticks still arrive
             if (/ALREADY/i.test((e as { errorCode?: string } | null)?.errorCode ?? errorMessage(e))) {
@@ -290,7 +321,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 this.activity.push('error', `tick error: ${errorMessage(e)}`);
             });
         }, 5_000);
-        this.activity.push('info', 'Gold service เริ่มทำงาน — รอสัญญาณ');
+        this.activity.push('info', 'Gold service started — waiting for signals');
         // breakeven manager runs regardless of the loop switch — protects any
         // open GOLD_AI position (research: gold retraces hard; lock at +1R)
         this.beTimer = setInterval(() => {
@@ -319,18 +350,18 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         if (!ai) return [];
         const mark =
             ai.verdict === 'CONFIRM'
-                ? '✅ AI ยืนยันระดับเดิม'
+                ? '✅ AI confirmed the original levels'
                 : ai.verdict === 'ADJUST'
-                  ? '✏️ AI ขยับระดับให้'
-                  : '🛑 AI ไม่ให้เข้าไม้นี้';
+                  ? '✏️ AI adjusted the levels'
+                  : '🛑 AI vetoed this trade';
         return [
             '',
-            `🤖 <b>${mark}</b> (มั่นใจ ${ai.confidence}/10)`,
-            ai.reason_th ? `• เหตุผล: ${this.esc(ai.reason_th)}` : '',
-            ai.key_levels ? `• แนวที่ใช้ตัดสิน: ${this.esc(ai.key_levels)}` : '',
-            ai.risk_note_th ? `• ⚠ ระวัง: ${this.esc(ai.risk_note_th)}` : '',
-            (ai as any).news_risk_th ? `• 📰 ข่าว/ปฏิทิน: ${this.esc((ai as any).news_risk_th)}` : '',
-            (ai as any).invalidation_th ? `• ❌ ไม้ตายเมื่อ: ${this.esc((ai as any).invalidation_th)}` : '',
+            `🤖 <b>${mark}</b> (confidence ${ai.confidence}/10)`,
+            ai.reason ? `• Reason: ${this.esc(ai.reason)}` : '',
+            ai.key_levels ? `• Key levels: ${this.esc(ai.key_levels)}` : '',
+            ai.risk_note ? `• ⚠ Risk: ${this.esc(ai.risk_note)}` : '',
+            (ai as any).news_risk ? `• 📰 News/calendar: ${this.esc((ai as any).news_risk)}` : '',
+            (ai as any).invalidation ? `• ❌ Invalidated if: ${this.esc((ai as any).invalidation)}` : '',
         ].filter(Boolean);
     }
 
@@ -340,24 +371,42 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * · lead = assist + ถ้า TA ไม่เจอ setup ให้ AI หาไม้เอง (ผ่านด่านเข้มกว่า + ขนาดไม้ไม่เกินครึ่ง)
      * รองรับ GOLD_AI_ASSIST=true แบบเดิม = assist
      */
-    aiMode(): 'off' | 'assist' | 'lead' {
+    aiMode(): AiMode {
         const raw = this.cfg('GOLD_AI_MODE', '').toLowerCase();
-        const mode =
-            raw === 'lead' || raw === 'assist' || raw === 'off'
-                ? raw
-                : this.cfg('GOLD_AI_ASSIST', 'false').toLowerCase() === 'true'
-                  ? 'assist'
-                  : 'off';
+        const mode: AiMode = (AI_MODES as readonly string[]).includes(raw)
+            ? (raw as AiMode)
+            : this.cfg('GOLD_AI_ASSIST', 'false').toLowerCase() === 'true'
+              ? 'assist'
+              : 'off';
         if (mode === 'off') return 'off';
-        if (!this.goldGeminiService.config.has_key) {
+        const claude = mode === 'ai_only' && this.aiProvider() === 'claude';
+        const hasKey = claude ? (this.goldAiService?.hasKey ?? false) : this.goldGeminiService.config.has_key;
+        if (!hasKey) {
+            const key = claude ? 'ANTHROPIC_API_KEY' : 'GEMINI_API_KEY';
             if (!this.assistKeyWarned) {
                 this.assistKeyWarned = true;
-                this.logger.warn(`AI mode=${mode} แต่ไม่มี GEMINI_API_KEY — ถือว่าปิด ใช้ TA ล้วน`);
-                this.activity.push('warn', `AI mode เปิดไว้ (${mode}) แต่ไม่มี GEMINI_API_KEY — ระบบใช้ TA ล้วน`);
+                this.logger.warn(`AI mode=${mode} but ${key} is not set — falling back to TA only`);
+                this.activity.push('warn', `AI mode is ${mode} but ${key} is not set — the bot is using TA only`);
             }
             return 'off';
         }
         return mode;
+    }
+
+    /** which vendor answers the AI-only mode (assist/lead are Gemini only) */
+    aiProvider(): AiProvider {
+        return this.cfg('GOLD_AI_PROVIDER', 'gemini').toLowerCase() === 'claude' ? 'claude' : 'gemini';
+    }
+
+    /** ta = rule-based analysis (with optional Gemini layers) · ai = Claude reads the data and decides alone */
+    engine(): 'ta' | 'ai' {
+        if (this.aiMode() === 'ai_only' && this.aiProvider() === 'claude') return 'ai';
+        return (this.configService?.get<string>('GOLD_ENGINE', 'ta') ?? 'ta').toLowerCase() === 'ai' ? 'ai' : 'ta';
+    }
+
+    aiStrictness(): AiStrictness {
+        const v = this.cfg('GOLD_AI_STRICTNESS', 'normal').toLowerCase();
+        return (AI_STRICTNESS_LEVELS as readonly string[]).includes(v) ? (v as AiStrictness) : 'normal';
     }
 
     aiAssistEnabled(): boolean {
@@ -399,7 +448,21 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 tp1: null,
                 tp2: null,
                 rr_tp1: null,
-                reason: `AI ไม่ให้เข้า: ${ai.reason_th || 'ไม่ระบุเหตุผล'}`,
+                reason: `AI veto: ${ai.reason || 'no reason given'}`,
+            };
+        }
+
+        const minAi = STRICTNESS_MIN_AI_CONFIDENCE[this.aiStrictness()];
+        if (minAi != null && (ai.confidence ?? 0) < minAi) {
+            return {
+                ...d,
+                order_type: 'NO_TRADE',
+                entry: null,
+                sl: null,
+                tp1: null,
+                tp2: null,
+                rr_tp1: null,
+                reason: `AI confidence ${ai.confidence ?? 0}/10 is below the ${this.aiStrictness()} strictness threshold ${minAi} — no trade`,
             };
         }
 
@@ -429,18 +492,18 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const driftAbs = Math.abs(entry - ta.entry);
         const driftCap =
             taRiskForDrift > 0
-                ? Math.min(taRiskForDrift * 0.5, ta.entry * 0.006) // ครึ่งหนึ่งของระยะ SL และไม่เกิน 0.6%
+                ? Math.min(taRiskForDrift * 0.5, ta.entry * 0.006) // half the SL distance and at most 0.6%
                 : ta.entry * 0.006;
         if (driftAbs > driftCap) {
             this.logger.warn(
-                `[AI] ขยับ entry ${driftAbs.toFixed(2)} เกินเพดาน ${driftCap.toFixed(2)} ` +
-                    `(ครึ่งของระยะ SL ${taRiskForDrift.toFixed(2)}) — ใช้ระดับของ TA แทน`,
+                `[AI] entry moved ${driftAbs.toFixed(2)}, above the cap ${driftCap.toFixed(2)} ` +
+                    `(half the SL distance ${taRiskForDrift.toFixed(2)}) — using the TA levels instead`,
             );
             return { ...d, size, confidence: conf };
         }
         // SL ผิดฝั่ง = ใช้ของ TA
         if ((isBuy && sl >= entry) || (!isBuy && sl <= entry)) {
-            this.logger.warn('[AI] SL อยู่ผิดฝั่งของ entry — ใช้ระดับของ TA แทน');
+            this.logger.warn('[AI] SL is on the wrong side of entry — using the TA levels instead');
             return { ...d, size, confidence: conf };
         }
         // R:R หลังขยับต้องยังคุ้ม
@@ -455,7 +518,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 tp1: null,
                 tp2: null,
                 rr_tp1: null,
-                reason: `AI ขยับแล้ว R:R เหลือ ${rr.toFixed(2)} ต่ำกว่าขั้นต่ำ ${rrMin} — ไม่เข้า`,
+                reason: `After the AI adjustment R:R is ${rr.toFixed(2)}, below the minimum ${rrMin} — no trade`,
             };
         }
 
@@ -464,7 +527,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const taRisk = ta.entry != null && ta.sl != null ? Math.abs(ta.entry - ta.sl) : 0;
         if (taRisk > 0 && risk < taRisk * 0.5) {
             this.logger.warn(
-                `[AI] บีบ SL จาก ${taRisk.toFixed(2)} เหลือ ${risk.toFixed(2)} (< ครึ่งของ TA) — ใช้ระดับของ TA แทน`,
+                `[AI] SL tightened from ${taRisk.toFixed(2)} to ${risk.toFixed(2)} (< half of TA) — using the TA levels instead`,
             );
             return { ...d, size, confidence: conf };
         }
@@ -473,7 +536,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         // applyProposal คุมสองฝั่งด้วย ATR อยู่แล้ว ทางนี้ซึ่งใช้บ่อยกว่ากลับไม่มีเพดานบน
         if (taRisk > 0 && risk > taRisk * 2) {
             this.logger.warn(
-                `[AI] ถ่าง SL จาก ${taRisk.toFixed(2)} เป็น ${risk.toFixed(2)} (> 2 เท่าของ TA) — ใช้ระดับของ TA แทน`,
+                `[AI] SL widened from ${taRisk.toFixed(2)} to ${risk.toFixed(2)} (> 2x TA) — using the TA levels instead`,
             );
             return { ...d, size, confidence: conf };
         }
@@ -487,8 +550,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const tickAge = tk ? Date.now() - tk.at : Infinity;
         if (!tk || tickAge > STALE_TICK_MS) {
             this.logger.warn(
-                `[AI] ไม่มีราคาสด ${p.key} ที่เชื่อได้ (${tk ? Math.round(tickAge / 1000) + ' วิ' : 'ไม่มี tick'}) ` +
-                    '— ตรวจฝั่งออเดอร์ไม่ได้ ใช้ระดับของ TA แทน',
+                `[AI] no reliable live price for ${p.key} (${tk ? Math.round(tickAge / 1000) + ' s' : 'no tick'}) ` +
+                    '— cannot check the order side, using the TA levels instead',
             );
             return { ...d, size, confidence: conf };
         }
@@ -498,7 +561,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const ok = wantBelow ? entry < mkt : entry > mkt;
             if (!ok) {
                 this.logger.warn(
-                    `[AI] entry ${entry} ผิดฝั่งของราคาตลาด ${mkt} สำหรับ ${ta.order_type} — ใช้ระดับของ TA แทน`,
+                    `[AI] entry ${entry} is on the wrong side of the market price ${mkt} for ${ta.order_type} — using the TA levels instead`,
                 );
                 return { ...d, size, confidence: conf };
             }
@@ -516,7 +579,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             size,
             rr_tp1: Number(rr.toFixed(2)),
             confidence: conf,
-            reason: moved ? `${ta.reason} | AI ขยับระดับ: ${ai.reason_th}` : `${ta.reason} | AI ยืนยัน`,
+            reason: moved ? `${ta.reason} | AI adjusted levels: ${ai.reason}` : `${ta.reason} | AI confirmed`,
         };
     }
 
@@ -538,6 +601,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         p: InstrumentProfile,
         series: Record<string, EnrichedBar[]> | null,
         mode: GoldMode,
+        origin: 'lead' | 'ai_only' = 'lead',
     ): GoldDecision {
         const no = (reason: string): GoldDecision => ({
             order_type: 'NO_TRADE',
@@ -552,39 +616,48 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             invalidation: '',
             playbook_ref: '',
             reason,
-            analysis_summary_th: reason,
+            analysis_summary: reason,
         });
 
-        if (!pr) return no('AI (โหมด lead) ไม่ตอบรอบนี้ — ไม่มีไม้');
+        if (!pr)
+            return no(`AI (${origin === 'ai_only' ? 'AI only' : 'lead'} mode) did not answer this round — no trade`);
         if (pr.action !== 'TRADE') {
-            return no(`AI ไม่เจอ setup: ${pr.reason_th || 'ไม่ระบุเหตุผล'}`);
+            return no(`AI found no setup: ${pr.reason || 'no reason given'}`);
+        }
+        const minAi = STRICTNESS_MIN_AI_CONFIDENCE[this.aiStrictness()];
+        if (minAi != null && pr.confidence < minAi) {
+            return no(
+                `AI confidence ${pr.confidence}/10 is below the ${this.aiStrictness()} strictness threshold ${minAi} — no trade`,
+            );
         }
         const { entry, sl, tp1 } = pr;
-        if (entry == null || sl == null || tp1 == null) return no('AI เสนอไม้แต่ระดับราคาไม่ครบ');
+        if (entry == null || sl == null || tp1 == null)
+            return no('AI proposed a trade but the price levels are incomplete');
 
         const isBuy = pr.order_type.startsWith('BUY');
         if ((isBuy && sl >= entry) || (!isBuy && sl <= entry)) {
-            return no(`AI เสนอ ${pr.order_type} แต่ SL อยู่ผิดฝั่งของ entry — ทิ้งไม้`);
+            return no(`AI proposed ${pr.order_type} but SL is on the wrong side of entry — trade dropped`);
         }
         if ((isBuy && tp1 <= entry) || (!isBuy && tp1 >= entry)) {
-            return no(`AI เสนอ ${pr.order_type} แต่ TP1 อยู่ผิดฝั่งของ entry — ทิ้งไม้`);
+            return no(`AI proposed ${pr.order_type} but TP1 is on the wrong side of entry — trade dropped`);
         }
 
         const risk = Math.abs(entry - sl);
         const rr = risk > 0 ? Math.abs(tp1 - entry) / risk : 0;
-        if (rr < rrMin) return no(`AI เสนอไม้ R:R ${rr.toFixed(2)} ต่ำกว่าขั้นต่ำ ${rrMin} — ไม่เข้า`);
+        if (rr < rrMin)
+            return no(`AI proposed a trade with R:R ${rr.toFixed(2)}, below the minimum ${rrMin} — no trade`);
 
         // SL ต้องสมเหตุผลเทียบความผันผวนจริง: แคบไปโดนไส้เทียนเขี่ย · กว้างไปเสี่ยงเกินงบ
         const atr = this.execAtr(p, mode, series);
         if (atr && atr > 0) {
             if (risk < atr * 0.3) {
                 return no(
-                    `AI วาง SL แคบ ${fmtPrice(p, risk)} (< 0.3×ATR ${fmtPrice(p, atr)}) — ไส้เทียนเขี่ยแน่ ทิ้งไม้`,
+                    `AI placed a tight SL ${fmtPrice(p, risk)} (< 0.3×ATR ${fmtPrice(p, atr)}) — wicks will surely tag it, trade dropped`,
                 );
             }
             if (risk > atr * 3) {
                 return no(
-                    `AI วาง SL กว้าง ${fmtPrice(p, risk)} (> 3×ATR ${fmtPrice(p, atr)}) — ไม่คุ้มความเสี่ยง ทิ้งไม้`,
+                    `AI placed a wide SL ${fmtPrice(p, risk)} (> 3×ATR ${fmtPrice(p, atr)}) — not worth the risk, trade dropped`,
                 );
             }
         }
@@ -595,7 +668,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const tickAge = tk ? Date.now() - tk.at : Infinity;
         if (!tk || tickAge > STALE_TICK_MS) {
             return no(
-                `ไม่มีราคาสด ${p.key} ที่เชื่อได้ (${tk ? Math.round(tickAge / 1000) + ' วิ' : 'ไม่มี tick'}) — ตรวจฝั่งออเดอร์ไม่ได้ ทิ้งไม้`,
+                `No reliable live price for ${p.key} (${tk ? Math.round(tickAge / 1000) + ' s' : 'no tick'}) — cannot check the order side, trade dropped`,
             );
         }
         {
@@ -603,7 +676,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const wantBelow = pr.order_type === 'BUY_LIMIT' || pr.order_type === 'SELL_STOP';
             if (wantBelow ? entry >= mkt : entry <= mkt) {
                 return no(
-                    `AI เสนอ ${pr.order_type} ที่ ${fmtPrice(p, entry)} ผิดฝั่งของราคาตลาด ${fmtPrice(p, mkt)} — ทิ้งไม้`,
+                    `AI proposed ${pr.order_type} at ${fmtPrice(p, entry)}, on the wrong side of the market price ${fmtPrice(p, mkt)} — trade dropped`,
                 );
             }
         }
@@ -625,15 +698,17 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             confidence: Math.min(TA_MAX_CONFIDENCE, pr.confidence),
             size,
             valid_until_utc: new Date(Date.now() + (cfgMode?.periodMin ?? 60) * 60_000 * 3).toISOString(),
-            invalidation: pr.invalidation_th || '',
+            invalidation: pr.invalidation || '',
             playbook_ref: pr.playbook_ref,
-            reason: `AI หาไม้เอง (lead): ${pr.reason_th}`,
-            analysis_summary_th: [
-                `🤖 ไม้นี้มาจาก AI ไม่ใช่ TA (TA ไม่เจอ setup รอบนี้)`,
+            reason: `${origin === 'ai_only' ? 'AI only' : 'AI found the trade (lead)'}: ${pr.reason}`,
+            analysis_summary: [
+                origin === 'ai_only'
+                    ? '🤖 AI-only mode: this trade was found by the AI'
+                    : '🤖 This trade comes from the AI, not TA (TA found no setup this round)',
                 `playbook: ${pr.playbook_ref}`,
-                pr.key_levels ? `แนวที่ใช้: ${pr.key_levels}` : '',
-                pr.risk_note_th ? `ระวัง: ${pr.risk_note_th}` : '',
-                pr.news_risk_th ? `ข่าว: ${pr.news_risk_th}` : '',
+                pr.key_levels ? `Key levels: ${pr.key_levels}` : '',
+                pr.risk_note ? `Risk: ${pr.risk_note}` : '',
+                pr.news_risk ? `News: ${pr.news_risk}` : '',
             ]
                 .filter(Boolean)
                 .join('\n'),
@@ -676,7 +751,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             fs.mkdirSync(path.dirname(f), { recursive: true });
             fs.writeFileSync(f, JSON.stringify(Object.fromEntries(this.overrides), null, 2));
         } catch (e) {
-            this.logger.error(`บันทึกค่าที่ตั้งไว้ไม่สำเร็จ (${errorMessage(e)}) — ค่าจะหายเมื่อรีสตาร์ท`);
+            this.logger.error(`Failed to save settings (${errorMessage(e)}) — they will be lost on restart`);
         }
     }
 
@@ -690,9 +765,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 if (typeof v === 'string') this.overrides.set(k, v);
             }
             // ค่าของ Gemini อยู่คนละ service ต้องยิงข้ามไปด้วย ไม่งั้นคืนมาแต่ไม่มีผล
-            for (const k of ['GOLD_AI_THINKING', 'GEMINI_MODEL']) {
+            for (const k of ['GOLD_AI_THINKING', 'GEMINI_MODEL', 'GOLD_AI_STRICTNESS']) {
                 const v = this.overrides.get(k);
                 if (v) this.goldGeminiService.setRuntime(k, v);
+            }
+            for (const k of ['GOLD_AI_THINKING', 'GOLD_CLAUDE_MODEL', 'GOLD_AI_STRICTNESS']) {
+                const v = this.overrides.get(k);
+                if (v) this.goldAiService?.setRuntime?.(k, v);
             }
             if (this.overrides.size) {
                 const shown = [
@@ -704,17 +783,17 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     .filter((k) => this.overrides.has(k))
                     .map((k) => `${k}=${this.overrides.get(k)}`);
                 this.logger.log(
-                    `คืนค่าที่ตั้งไว้จาก ${f} (${this.overrides.size} ค่า)${shown.length ? ' · ' + shown.join(' · ') : ''}`,
+                    `Restored settings from ${f} (${this.overrides.size} values)${shown.length ? ' · ' + shown.join(' · ') : ''}`,
                 );
             }
         } catch (e) {
-            this.logger.error(`อ่านค่าที่ตั้งไว้ไม่สำเร็จ (${errorMessage(e)}) — ใช้ค่าจาก .env แทน`);
+            this.logger.error(`Failed to read saved settings (${errorMessage(e)}) — using .env values instead`);
         }
     }
 
     /** อ่าน config โดยเช็ค override จาก dashboard ก่อน แล้วค่อย fallback ไป env */
     private cfg(key: string, fallback: string): string {
-        return this.overrides.get(key) ?? this.configService.get<string>(key, fallback);
+        return this.overrides?.get(key) ?? this.configService?.get<string>(key, fallback) ?? fallback;
     }
 
     getSettings() {
@@ -737,7 +816,20 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             sizing: this.cfg('GOLD_SIZING', 'risk'),
             // AI assist — ตัวช่วยหาจุดเข้า (เปิด/ปิดได้จากหน้า start loop)
             ai_assist: this.aiAssistEnabled(),
-            ai_mode: this.aiMode(), // off | assist | lead
+            ai_mode: this.aiMode(), // off | assist | lead | ai_only (effective: off when the key is missing)
+            ai_mode_selected: (AI_MODES as readonly string[]).includes(this.cfg('GOLD_AI_MODE', '').toLowerCase())
+                ? this.cfg('GOLD_AI_MODE', '').toLowerCase()
+                : this.aiMode(),
+            ai_provider: this.aiProvider(),
+            ai_strictness: this.aiStrictness(),
+            ai_strictness_min_confidence: STRICTNESS_MIN_AI_CONFIDENCE[this.aiStrictness()],
+            claude: {
+                model: this.goldAiService?.model,
+                effort: this.goldAiService?.effort,
+                has_key: this.goldAiService?.hasKey ?? false,
+            },
+            engine: this.engine(),
+            risk_profile: this.riskProfileState(),
             ai_gate: this.aiGate(), // near_miss | always | setup_only
             ai_max_calls_per_day: parseInt(this.cfg('GOLD_AI_MAX_CALLS_PER_DAY', '10'), 10),
             ai_calls: this.goldGeminiService.usage(parseInt(this.cfg('GOLD_AI_MAX_CALLS_PER_DAY', '10'), 10)),
@@ -754,7 +846,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * โดยยังไม่แตะค่าที่ใช้อยู่เลย (เดิมฟิลด์ที่ผ่านก่อนหน้าค้างอยู่ใน memory แต่ไม่ถูกบันทึก)
      * ผ่านครบแล้วจึง apply + persist ในขั้นเดียว
      */
-    setSettings(body: Record<string, any>) {
+    setSettings(body: Record<string, any>, opts: { riskProfile?: RiskProfileMarker } = {}) {
         const map: Record<string, { key: string; min: number; max: number }> = {
             risk_usd_per_trade: { key: 'GOLD_RISK_USD_PER_TRADE', min: 1, max: 100_000 },
             daily_max_loss_usd: { key: 'GOLD_DAILY_MAX_LOSS_USD', min: 0, max: 1_000_000 },
@@ -777,7 +869,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const given = (v: unknown) => v !== undefined && v !== null && v !== '';
         // ---- 1) validate only: nothing below may touch live state until every field has passed ----
         const staged = new Map<string, string>(); // override key → value (later fields win, e.g. ai_mode over ai_assist)
-        const geminiRuntime = new Map<string, string>(); // ค่าที่ต้องยิงข้ามไป goldGeminiService ด้วย
+        const geminiRuntime = new Map<string, string>(); // values that must also be forwarded to goldGeminiService
+        const claudeRuntime = new Map<string, string>(); // same for goldAiService (Claude engine)
         const logs: string[] = [];
         const applied: string[] = [];
         let leadOn = false;
@@ -787,23 +880,23 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         if (given(body.ai_assist)) {
             const on = body.ai_assist === true || String(body.ai_assist).toLowerCase() === 'true';
             if (on && !this.goldGeminiService.apiKey) {
-                throw new DomainError('เปิด AI assist ไม่ได้: ยังไม่ได้ตั้ง GEMINI_API_KEY ใน env');
+                throw new DomainError('Cannot enable AI assist: GEMINI_API_KEY is not set in env');
             }
             staged.set('GOLD_AI_ASSIST', on ? 'true' : 'false');
             staged.set('GOLD_AI_MODE', on ? 'assist' : 'off');
             applied.push('ai_assist');
-            logs.push(`AI assist ${on ? 'เปิด' : 'ปิด'} จาก dashboard`);
+            logs.push(`AI assist ${on ? 'enabled' : 'disabled'} from dashboard`);
         }
 
         // ai_gate: รอบไหนควรถาม AI (ดู aiGate() ว่าแต่ละค่าหมายถึงอะไร)
         if (given(body.ai_gate)) {
             const g = String(body.ai_gate).toLowerCase();
             if (!['near_miss', 'always', 'setup_only'].includes(g)) {
-                throw new DomainError('ai_gate ต้องเป็น near_miss | always | setup_only');
+                throw new DomainError('ai_gate must be near_miss | always | setup_only');
             }
             staged.set('GOLD_AI_GATE', g);
             applied.push(`ai_gate=${g}`);
-            logs.push(`AI gate → ${g} จาก dashboard`);
+            logs.push(`AI gate → ${g} from dashboard`);
         }
 
         // ระดับการคิดของ Gemini — ค่าตาม doc: minimal | low | medium | high (3.x รองรับครบ)
@@ -811,69 +904,122 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         if (given(body.ai_thinking)) {
             const lv = String(body.ai_thinking).toLowerCase().trim();
             if (!['minimal', 'low', 'medium', 'high'].includes(lv)) {
-                throw new DomainError('ai_thinking ต้องเป็น minimal | low | medium | high');
+                throw new DomainError('ai_thinking must be minimal | low | medium | high');
             }
             staged.set('GOLD_AI_THINKING', lv);
             geminiRuntime.set('GOLD_AI_THINKING', lv);
+            claudeRuntime.set('GOLD_AI_THINKING', lv);
             applied.push(`ai_thinking=${lv}`);
-            logs.push(`ระดับการคิดของ AI → ${lv} จาก dashboard`);
+            logs.push(`AI thinking level → ${lv} from dashboard`);
         }
 
         // รุ่น Gemini — รับเฉพาะชื่อที่ขึ้นต้น gemini- และเป็น 3.x ขึ้นไป (thinking_level รองรับครบ)
         if (given(body.ai_model)) {
             const m = String(body.ai_model).trim();
-            const ver = parseFloat(m.replace(/^gemini-/, ''));
-            if (!/^gemini-[a-z0-9.-]+$/i.test(m) || !Number.isFinite(ver) || ver < 3) {
-                throw new DomainError('ai_model ต้องเป็นรุ่น Gemini 3.x ขึ้นไป เช่น gemini-3.5-flash');
+            if (/^claude-[a-z0-9.-]+$/i.test(m)) {
+                if (!(this.goldAiService?.hasKey ?? false)) {
+                    throw new DomainError('Cannot use a Claude model: ANTHROPIC_API_KEY is not set');
+                }
+                const mode = given(body.ai_mode) ? String(body.ai_mode).toLowerCase() : this.cfg('GOLD_AI_MODE', '');
+                if (mode === 'assist' || mode === 'lead') {
+                    throw new DomainError(
+                        `Claude models work in AI-only mode only — the current AI mode is ${mode} (Gemini only)`,
+                    );
+                }
+                staged.set('GOLD_AI_PROVIDER', 'claude');
+                staged.set('GOLD_CLAUDE_MODEL', m);
+                claudeRuntime.set('GOLD_CLAUDE_MODEL', m);
+                applied.push(`ai_model=${m}`);
+                logs.push(`Claude model → ${m} from the dashboard`);
+            } else {
+                const ver = parseFloat(m.replace(/^gemini-/, ''));
+                if (!/^gemini-[a-z0-9.-]+$/i.test(m) || !Number.isFinite(ver) || ver < 3) {
+                    throw new DomainError(
+                        'ai_model must be a Gemini 3.x+ model (e.g. gemini-3.5-flash) or a Claude model (claude-...)',
+                    );
+                }
+                staged.set('GOLD_AI_PROVIDER', 'gemini');
+                staged.set('GEMINI_MODEL', m);
+                geminiRuntime.set('GEMINI_MODEL', m);
+                applied.push(`ai_model=${m}`);
+                logs.push(`Gemini model → ${m} from the dashboard`);
             }
-            staged.set('GEMINI_MODEL', m);
-            geminiRuntime.set('GEMINI_MODEL', m);
-            applied.push(`ai_model=${m}`);
-            logs.push(`รุ่น Gemini → ${m} จาก dashboard`);
+        }
+
+        // ai_strictness: only ever tightens (see ai-strictness.ts)
+        if (given(body.ai_strictness)) {
+            const lv = String(body.ai_strictness).toLowerCase().trim();
+            if (!(AI_STRICTNESS_LEVELS as readonly string[]).includes(lv)) {
+                throw new DomainError(`ai_strictness must be ${AI_STRICTNESS_LEVELS.join(' | ')}`);
+            }
+            staged.set('GOLD_AI_STRICTNESS', lv);
+            geminiRuntime.set('GOLD_AI_STRICTNESS', lv);
+            claudeRuntime.set('GOLD_AI_STRICTNESS', lv);
+            applied.push(`ai_strictness=${lv}`);
+            logs.push(`AI strictness → ${lv} from the dashboard`);
         }
 
         // ai_mode: off | assist | lead — สวิตช์ละเอียดกว่า ai_assist (ถ้าส่งมาจะทับ)
         if (given(body.ai_mode)) {
             const m = String(body.ai_mode).toLowerCase();
-            if (!['off', 'assist', 'lead'].includes(m)) {
-                throw new DomainError('ai_mode ต้องเป็น off | assist | lead');
+            if (!(AI_MODES as readonly string[]).includes(m)) {
+                throw new DomainError('ai_mode must be off | assist | lead | ai_only');
             }
-            if (m !== 'off' && !this.goldGeminiService.apiKey) {
-                throw new DomainError(`เปิด AI mode=${m} ไม่ได้: ยังไม่ได้ตั้ง GEMINI_API_KEY ใน env`);
+            // the provider this request ends with: a model in the same body wins over the stored one
+            const provider: AiProvider = given(body.ai_model)
+                ? /^claude-/i.test(String(body.ai_model).trim())
+                    ? 'claude'
+                    : 'gemini'
+                : this.aiProvider();
+            if ((m === 'assist' || m === 'lead') && provider === 'claude') {
+                throw new DomainError(
+                    `AI mode ${m} works with Gemini models only — pick a Gemini model, or use ai_only for Claude`,
+                );
+            }
+            if (m !== 'off' && provider === 'claude' && !(this.goldAiService?.hasKey ?? false)) {
+                throw new DomainError(`Cannot enable AI mode ${m}: ANTHROPIC_API_KEY is not set`);
+            }
+            if (m !== 'off' && provider === 'gemini' && !this.goldGeminiService.apiKey) {
+                throw new DomainError(`Cannot enable AI mode ${m}: GEMINI_API_KEY is not set`);
             }
             staged.set('GOLD_AI_MODE', m);
             staged.set('GOLD_AI_ASSIST', m === 'off' ? 'false' : 'true');
             modeChanged = true;
             leadOn = m === 'lead';
             applied.push(`ai_mode=${m}`);
-            logs.push(`AI mode → ${m} จาก dashboard`);
+            logs.push(`AI mode → ${m} from dashboard`);
         }
 
         for (const [field, spec] of Object.entries(map)) {
             if (!given(body[field])) continue;
             const v = Number(body[field]);
             if (!isFinite(v) || v < spec.min || v > spec.max) {
-                throw new DomainError(`${field} ต้องเป็นตัวเลข ${spec.min}–${spec.max}`);
+                throw new DomainError(`${field} must be a number ${spec.min}–${spec.max}`);
             }
             staged.set(spec.key, String(v));
             applied.push(`${field}=${v}`);
         }
 
         // ---- 2) every field passed: apply and persist in one step ----
+        if (opts.riskProfile) {
+            staged.set('GOLD_RISK_PROFILE', JSON.stringify(opts.riskProfile));
+            applied.push(`risk_profile=${opts.riskProfile.name}`);
+        }
         if (applied.length) {
             for (const [k, v] of staged) this.overrides.set(k, v);
             for (const [k, v] of geminiRuntime) this.goldGeminiService.setRuntime(k, v);
+            for (const [k, v] of claudeRuntime) this.goldAiService?.setRuntime?.(k, v);
             if (modeChanged) this.assistKeyWarned = false;
             for (const line of logs) this.logger.log(line);
             if (leadOn) {
                 this.activity.push(
                     'warn',
-                    '🤖 เปิดโหมด AI lead — เมื่อ TA ไม่เจอ setup AI จะหาไม้เอง (ขนาดไม้ไม่เกินครึ่ง ผ่านด่านความเสี่ยงทุกด่านเหมือนเดิม)',
+                    '🤖 AI lead mode enabled — when TA finds no setup the AI looks for a trade itself (size capped at half, all risk guards still apply)',
                 );
             }
             // จำลงไฟล์ทันที ไม่งั้นค่าที่เพิ่งตั้งหายตอนรีสตาร์ทแล้วเด้งกลับไปค่า .env ที่หลวมกว่า
             this.persistOverrides();
-            this.activity.push('warn', `ตั้งค่าความเสี่ยงใหม่จาก dashboard: ${applied.join(' · ')}`);
+            this.activity.push('warn', `Risk settings updated from dashboard: ${applied.join(' · ')}`);
         }
         return this.getSettings();
     }
@@ -899,22 +1045,148 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     /** รอบนี้ควรให้ AI หาไม้เองไหม (ใช้เฉพาะตอน TA ตอบ NO_TRADE ในโหมด lead) */
     private shouldAskAiForSetup(d: GoldDecision): { ask: boolean; why: string } {
         const gate = this.aiGate();
-        if (gate === 'setup_only') return { ask: false, why: 'gate=setup_only — ถาม AI เฉพาะตอน TA เจอ setup' };
+        if (gate === 'setup_only')
+            return { ask: false, why: 'gate=setup_only — ask the AI only when TA finds a setup' };
         if (gate === 'always') return { ask: true, why: 'gate=always' };
         return d.near_miss
-            ? { ask: true, why: `เฉียด (${d.near_miss_rule})` }
-            : { ask: false, why: 'ไม่มี setup ตั้งแต่แรก — ถามไปก็เสียโควตาเปล่า' };
+            ? { ask: true, why: `near miss (${d.near_miss_rule})` }
+            : { ask: false, why: 'no setup at all — asking would just waste quota' };
     }
 
-    /** รายชื่อรุ่น Gemini ที่เลือกได้จริง + รุ่นที่ใช้อยู่ตอนนี้ */
+    /**
+     * Models the dashboard can pick, from every provider with a key. `modes` says where each one works:
+     * Gemini serves assist/lead/ai_only, Claude serves ai_only only. `current` is the model in use for
+     * the selected provider (kept as a string for older clients); `gemini_current` / `claude_current` per provider.
+     */
     async listAiModels() {
-        const current = this.goldGeminiService.config.model;
+        const gemini_current = this.goldGeminiService.config.model;
+        const claude_current = this.goldAiService?.model;
+        const errors: string[] = [];
+        const [gem, cla] = await Promise.all([
+            this.goldGeminiService.listModels().catch((e) => {
+                errors.push(`Gemini: ${errorMessage(e)}`);
+                return [] as Array<{ id: string; label: string; out?: number }>;
+            }),
+            this.goldAiService.listModels().catch((e) => {
+                errors.push(`Claude: ${errorMessage(e)}`);
+                return [] as Array<{ id: string; label: string }>;
+            }),
+        ]);
+        if (errors.length) this.logger.warn(`Could not list AI models: ${errors.join(' · ')}`);
+        const models = [
+            ...gem.map((m) => ({ ...m, provider: 'gemini' as const, modes: ['assist', 'lead', 'ai_only'] })),
+            ...cla.map((m) => ({ ...m, provider: 'claude' as const, modes: ['ai_only'] })),
+        ];
+        return {
+            current: this.aiProvider() === 'claude' ? claude_current : gemini_current,
+            provider: this.aiProvider(),
+            gemini_current,
+            claude_current,
+            has_gemini_key: !!this.goldGeminiService.apiKey,
+            has_claude_key: this.goldAiService?.hasKey ?? false,
+            models,
+            ...(errors.length ? { error: errors.join(' · ') } : {}),
+        };
+    }
+
+    /** every setting that decides how a round trades, for the round's archive record and its order */
+    configSnapshot(p: InstrumentProfile, mode: GoldMode, rrMin: number): ConfigSnapshot {
+        const n = this.getSettingsNumbers();
+        const gemini = this.goldGeminiService.config;
+        const provider = this.aiProvider();
+        const selected = this.cfg('GOLD_AI_MODE', '').toLowerCase();
+        return {
+            app: appVersion(),
+            account_mode: this.configService.get<string>('CTRADER_ACCOUNT_MODE', 'DEMO').toUpperCase(),
+            instrument: {
+                key: p.key,
+                symbol_id: this.instruments.cachedSymbolId(p),
+                digits: p.digits,
+                pip: p.pip,
+                units_per_lot: p.unitsPerLot,
+            },
+            mode: {
+                name: mode,
+                rr_min: rrMin,
+                period_min: MODE_CFG[mode].periodMin,
+                tradable_modes: this.tradableModesFor(p),
+            },
+            engine: this.engine(),
+            data_source: this.configService.get<string>('GOLD_DATA_SOURCE', 'local').toLowerCase(),
+            risk_profile: this.riskProfileState(),
+            risk: {
+                sizing: this.cfg('GOLD_SIZING', 'risk').toLowerCase(),
+                risk_usd_per_trade: n.risk_usd_per_trade,
+                base_lot: parseFloat(this.cfg('GOLD_BASE_LOT', '0.1')),
+                daily_max_loss_usd: n.daily_max_loss_usd,
+                max_open_positions: n.max_open_positions,
+                max_open_positions_total: n.max_open_positions_total,
+                min_confidence: n.min_confidence,
+                loss_cooldown_bars: n.loss_cooldown_bars,
+                scalp_max_per_day: n.scalp_max_per_day,
+                max_lot: this.maxLotFor(p),
+                risk_tolerance: parseFloat(this.cfg('GOLD_RISK_TOLERANCE', '1.2')),
+            },
+            ai: {
+                mode_selected: selected || this.aiMode(),
+                mode_effective: this.aiMode(),
+                provider,
+                model: provider === 'claude' ? this.goldAiService.model : gemini.model,
+                thinking: gemini.thinking_level,
+                strictness: this.aiStrictness(),
+                strictness_min_confidence: STRICTNESS_MIN_AI_CONFIDENCE[this.aiStrictness()],
+                gate: this.aiGate(),
+                temperature: gemini.temperature,
+                max_calls_per_day: parseInt(this.cfg('GOLD_AI_MAX_CALLS_PER_DAY', '10'), 10),
+            },
+            overrides: withoutSecrets(this.overrides),
+        };
+    }
+
+    /** live bid/ask of the instrument at this moment (null without a tick) */
+    private tickSnapshot(p: InstrumentProfile): RoundTrace['market'] {
+        const tk = this.getLastTick(p);
+        if (!tk) return null;
+        return {
+            bid: tk.bid,
+            ask: tk.ask,
+            spread: Number((tk.ask - tk.bid).toFixed(p.digits)),
+            tick_age_ms: Date.now() - tk.at,
+        };
+    }
+
+    /** the last applied risk profile and whether a setting was changed by hand since */
+    riskProfileState(): { id: string; name: string; modified: boolean; changed: string[] } | null {
+        const raw = this.overrides.get('GOLD_RISK_PROFILE');
+        if (!raw) return null;
         try {
-            return { current, models: await this.goldGeminiService.listModels() };
-        } catch (e) {
-            this.logger.warn(`ดึงรายชื่อรุ่น Gemini ไม่ได้: ${errorMessage(e)}`);
-            return { current, models: [], error: errorMessage(e) };
+            const m = JSON.parse(raw) as RiskProfileMarker;
+            const now = this.getSettingsNumbers();
+            const changed = Object.entries(m.applied)
+                .filter(([k, v]) => k in now && Number(now[k]) !== Number(v))
+                .map(([k]) => k);
+            return { id: m.id, name: m.name, modified: changed.length > 0, changed };
+        } catch {
+            return null;
         }
+    }
+
+    /** the numeric risk settings keyed like the setSettings body (used to compare against a profile) */
+    private getSettingsNumbers(): Record<string, number> {
+        const lot = (k: InstrumentKey) => this.maxLotFor(INSTRUMENTS[k]);
+        return {
+            risk_usd_per_trade: parseFloat(this.cfg('GOLD_RISK_USD_PER_TRADE', '1500')),
+            daily_max_loss_usd: parseFloat(this.cfg('GOLD_DAILY_MAX_LOSS_USD', '4000')),
+            max_open_positions: parseInt(this.cfg('GOLD_MAX_OPEN_POSITIONS', '20'), 10),
+            max_open_positions_total: parseInt(this.cfg('GOLD_MAX_OPEN_POSITIONS_TOTAL', '0'), 10),
+            scalp_max_per_day: parseInt(this.cfg('GOLD_SCALP_MAX_PER_DAY', '40'), 10),
+            min_confidence: parseInt(this.cfg('GOLD_MIN_CONFIDENCE', '7'), 10),
+            loss_cooldown_bars: parseInt(this.cfg('GOLD_LOSS_COOLDOWN_BARS', '3'), 10),
+            max_lot_xauusd: lot('XAUUSD'),
+            max_lot_eurusd: lot('EURUSD'),
+            max_lot_gbpusd: lot('GBPUSD'),
+            max_lot_usdjpy: lot('USDJPY'),
+        };
     }
 
     /** ปุ่มรีเซ็ตโควตา AI บน dashboard — เริ่มนับใหม่ทันที ไม่ต้องรอข้ามวัน */
@@ -922,7 +1194,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const max = parseInt(this.cfg('GOLD_AI_MAX_CALLS_PER_DAY', '10'), 10);
         const before = this.goldGeminiService.resetUsage();
         this.aiQuotaWarnedDay.clear();
-        this.activity.push('ok', `🔄 รีเซ็ตโควตา AI แล้ว (เดิมใช้ไป ${before}/${max} ครั้ง) — กลับมาใช้ AI ได้ตามปกติ`);
+        this.activity.push('ok', `🔄 AI quota reset (previously used ${before}/${max} calls) — AI is available again`);
         return { reset_from: before, ...this.goldGeminiService.usage(max) };
     }
 
@@ -950,13 +1222,16 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const limit = parseFloat(this.cfg('GOLD_DAILY_MAX_LOSS_USD', '4000'));
         const now = new Date();
         this.dailyStopReset = { day: now.toISOString().slice(0, 10), ts: now.getTime() };
-        this.pnlCache = null; // บังคับให้ไปถาม broker ใหม่ ไม่ใช้ค่าที่แคชไว้ก่อนกด
-        const beforeTxt = before == null ? 'ยังไม่เคยอ่าน' : `${before.toFixed(2)} USD`;
-        this.logger.warn(`เคลียร์ daily stop ด้วยมือ (P&L ก่อนกด ${beforeTxt} · เพดาน -${limit}) — เริ่มนับใหม่จากนี้`);
+        this.pnlCache = null; // force a fresh broker query instead of the value cached before the click
+        this.deals.invalidate();
+        const beforeTxt = before == null ? 'never read' : `${before.toFixed(2)} USD`;
+        this.logger.warn(
+            `Daily stop cleared manually (P&L before clearing ${beforeTxt} · limit -${limit}) — counting restarts now`,
+        );
         this.activity.push(
             'warn',
-            `⚠️ เคลียร์ daily stop ด้วยมือ (ขาดทุนก่อนกด ${beforeTxt}) — เริ่มนับใหม่จากตอนนี้ ` +
-                `· ด่านยังทำงานต่อ ถ้าขาดทุนใหม่ถึง -${limit} จะหยุดอีก`,
+            `⚠️ Daily stop cleared manually (loss before clearing ${beforeTxt}) — counting restarts from now ` +
+                `· the guard stays active and will stop again if new losses reach -${limit}`,
         );
         return {
             reset_at: now.toISOString(),
@@ -980,7 +1255,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         }
         this.logger.log(
             `automate ${enabled ? 'STARTED' : 'STOPPED'} ` +
-                `(modes: ${this.enabledModes().join(', ')} · ตราสาร: ${this.enabledInstruments()
+                `(modes: ${this.enabledModes().join(', ')} · instruments: ${this.enabledInstruments()
                     .map((p) => p.key)
                     .join(', ')})`,
         );
@@ -1045,7 +1320,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             if (!o) continue;
             const symbolId = num(pos.tradeData?.symbolId);
             const prof = this.instruments.profileBySymbolId(symbolId);
-            if (!prof) continue; // ไม้ของ symbol ที่ระบบไม่รู้จัก — ไม่แตะ
+            if (!prof) continue; // position of an unknown symbol — leave it alone
             const px = await lastPrice(symbolId);
             if (px == null) continue;
             const entry = num(pos.price) || o.price;
@@ -1067,7 +1342,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     stt.lastSl = newSl;
                     this.logger.log(`[${tag} BE] position ${pid} reached +1R (px ${px}) — SL moved ${sl} -> ${newSl}`);
                     await this.telegramService.notifyOrderSuccess(
-                        `🔒 [${tag}] +1R แล้ว เลื่อน SL กันทุน\nposition ${pid}: SL ${sl} → ${newSl} (entry ${entry})`,
+                        `🔒 [${tag}] reached +1R, SL moved to breakeven\nposition ${pid}: SL ${sl} → ${newSl} (entry ${entry})`,
                     );
                 }
                 // step 2: +1.5R ขึ้นไป -> trail 0.75R หลังราคา (ขยับเมื่อดีขึ้น >= 0.25R)
@@ -1169,7 +1444,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             blocked_modes: Object.fromEntries(INSTRUMENT_KEYS.map((k) => [k, this.blockedModesFor(INSTRUMENTS[k])])),
             max_open_positions_total: parseInt(this.cfg('GOLD_MAX_OPEN_POSITIONS_TOTAL', '0'), 10),
             accountMode: this.configService.get<string>('CTRADER_ACCOUNT_MODE', 'DEMO').toUpperCase(),
-            engine: this.configService.get<string>('GOLD_ENGINE', 'ta').toLowerCase(),
+            engine: this.engine(),
             ai_assist: this.aiAssistEnabled(),
             instrument: this.instrumentInfo(prof),
             ctraderAuthorized: this.ctraderService.isAuthorized,
@@ -1239,17 +1514,17 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 if (wasOpen) {
                     this.activity.push(
                         'warn',
-                        `⏸ ${prof.emoji} ${prof.key}: ${mkt.reason} — พักเฉพาะตราสารนี้ จะกลับมาทำงานต่อเองเมื่อตลาดเปิด`,
+                        `⏸ ${prof.emoji} ${prof.key}: ${mkt.reason} — pausing this instrument only, will resume automatically when the market opens`,
                     );
                     this.marketWasOpen.set(prof.key, false);
                 }
-                waits.push(`${prof.key}: ตลาดปิด`);
+                waits.push(`${prof.key}: market closed`);
                 continue;
             }
             if (!wasOpen) {
                 this.activity.push(
                     'ok',
-                    `▶ ${prof.emoji} ${prof.key}: ${prof.hours.label_th}เปิดแล้ว (${mkt.et_time} ET) — กลับมาทำงานต่ออัตโนมัติ`,
+                    `▶ ${prof.emoji} ${prof.key}: ${prof.hours.label_th} reopened (${mkt.et_time} ET) — resuming automatically`,
                 );
                 this.marketWasOpen.set(prof.key, true);
                 // เริ่มนับแท่งใหม่เฉพาะตราสารนี้ ไม่ต้องไล่วิเคราะห์ย้อนหลังตอนเพิ่งเปิด
@@ -1264,13 +1539,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             for (const mode of this.tradableModesFor(prof)) {
                 const tag = this.enabledInstruments().length > 1 ? `${prof.key}/${mode}` : mode;
                 if (this.running.has(this.sk(mode, prof))) {
-                    waits.push(`${tag}: กำลังวิเคราะห์…`);
+                    waits.push(`${tag}: analyzing…`);
                     continue;
                 }
 
                 if (mode === 'position') {
                     if (this.isPositionDue(now, prof)) this.launch(mode, prof);
-                    else waits.push(`${tag}: รอรอบรายวัน`);
+                    else waits.push(`${tag}: waiting for the daily run`);
                     continue;
                 }
 
@@ -1284,13 +1559,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     st.lastBarBucket = bucket;
                     this.activity.push(
                         'info',
-                        `แท่ง ${cfg.periodMin}m ปิด → เริ่มวิเคราะห์รอบใหม่`,
+                        `${cfg.periodMin}m bar closed → starting a new analysis round`,
                         `${prof.key}/${mode}`,
                     );
                     this.launch(mode, prof);
                 } else {
                     const leftMs = periodMs - sinceBarOpenMs;
-                    waits.push(`${tag}: อีก ${this.fmtWait(leftMs)}`);
+                    waits.push(`${tag}: in ${this.fmtWait(leftMs)}`);
                 }
             }
         }
@@ -1299,7 +1574,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
 
     private fmtWait(ms: number): string {
         const s = Math.max(0, Math.round(ms / 1000));
-        return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} น.` : `${s} วิ`;
+        return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} min` : `${s} s`;
     }
 
     /** one activity line every ~5s so the dashboard shows the bot is alive */
@@ -1314,10 +1589,10 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 const t = this.getLastTick(p);
                 // โชว์อายุราคาเมื่อค้าง เพื่อให้เห็นทันทีว่าเลขที่นิ่งอยู่คือราคาเก่า ไม่ใช่ตลาดไม่ขยับ
                 const age = t ? now.getTime() - t.at : 0;
-                const stale = t && age > STALE_TICK_MS ? ` ⚠ ค้าง ${Math.round(age / 60_000)} นาที` : '';
+                const stale = t && age > STALE_TICK_MS ? ` ⚠ stale ${Math.round(age / 60_000)} min` : '';
                 return t
                     ? `${p.key} ${fmtPrice(p, t.bid)}/${fmtPrice(p, t.ask)} (spread ${fmtPrice(p, t.ask - t.bid)})${stale}`
-                    : `${p.key}: รอราคาสด`;
+                    : `${p.key}: waiting for live price`;
             })
             .join(' | ');
         const et = new Intl.DateTimeFormat('en-GB', {
@@ -1329,13 +1604,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         if (mkt) {
             const left =
                 mkt.minutes_to_open != null
-                    ? ` (อีก ${Math.floor(mkt.minutes_to_open / 60)}:${String(mkt.minutes_to_open % 60).padStart(2, '0')} ชม.)`
+                    ? ` (in ${Math.floor(mkt.minutes_to_open / 60)}:${String(mkt.minutes_to_open % 60).padStart(2, '0')} h)`
                     : '';
             this.activity.push('info', `${px} · ${et} ET · ⏸ ${mkt.reason}${left}`);
             return;
         }
         if (!waits) {
-            this.activity.push('info', `${px} · ${et} ET · loop ปิดอยู่ (กด Start เพื่อให้บอทเทรดเอง)`);
+            this.activity.push('info', `${px} · ${et} ET · loop is off (press Start to let the bot trade)`);
             return;
         }
         this.activity.push('info', `${px} · ${et} ET · ${waits.join(' | ')}`);
@@ -1385,6 +1660,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         st.lastError = null;
         let archData: GoldExport | null = null;
         let archResult: { decision: GoldDecision | null; outcome: string } | null = null;
+        const trace = newTrace(this.configSnapshot(p, mode, cfg.rrMin));
         this.currentMode = mode;
 
         try {
@@ -1405,8 +1681,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             if (!this.tradableModesFor(p).includes(mode)) {
                 return (archResult = finish(
                     null,
-                    `skipped: ${p.key} ไม่เปิดโหมด ${mode} — ไม้ต่ำสุด 0.01 lot เสี่ยงเกินงบต่อไม้เมื่อ SL กว้าง ` +
-                        `(เปิดได้ที่ env GOLD_MODES_${p.key})`,
+                    `skipped: ${p.key} does not enable mode ${mode} — the minimum 0.01 lot risks more than the per-trade budget with a wide SL ` +
+                        `(enable it via env GOLD_MODES_${p.key})`,
                 ));
             }
 
@@ -1424,17 +1700,18 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             if (mode === 'scalp') {
                 const maxScalps = parseInt(this.cfg('GOLD_SCALP_MAX_PER_DAY', '40'), 10);
                 if (this.scalpsToday(p) >= maxScalps) {
-                    return (archResult = finish(null, `skipped: ครบเพดาน scalp ${maxScalps} ไม้/วันแล้ว`));
+                    return (archResult = finish(null, `skipped: scalp limit of ${maxScalps} trades/day reached`));
                 }
             }
 
             // guard: max concurrent positions on this instrument
             const maxOpen = parseInt(this.cfg('GOLD_MAX_OPEN_POSITIONS', '20'), 10);
             const openPositions = await this.getOpenPositions(p, symbolId);
+            trace.guards.open_positions = openPositions.count;
             if (openPositions.count >= maxOpen) {
                 return (archResult = finish(
                     null,
-                    `skipped: ${p.key} มีภาระค้าง ${openPositions.count} รายการ (ไม้เปิด + ออเดอร์รอ) >= เพดาน ${maxOpen}`,
+                    `skipped: ${p.key} has ${openPositions.count} open exposures (open positions + pending orders) >= limit ${maxOpen}`,
                 ));
             }
 
@@ -1444,10 +1721,11 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const maxOpenTotal = parseInt(this.cfg('GOLD_MAX_OPEN_POSITIONS_TOTAL', '0'), 10);
             if (maxOpenTotal > 0) {
                 const totalOpen = await this.getOpenPositionsAllInstruments();
+                trace.guards.open_positions_total = totalOpen;
                 if (totalOpen >= maxOpenTotal) {
                     return (archResult = finish(
                         null,
-                        `skipped: รวมทุกตราสารมีภาระค้าง ${totalOpen} รายการ >= เพดานรวม ${maxOpenTotal}`,
+                        `skipped: all instruments combined have ${totalOpen} open exposures >= total limit ${maxOpenTotal}`,
                     ));
                 }
             }
@@ -1456,11 +1734,12 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const dailyStop = parseFloat(this.cfg('GOLD_DAILY_MAX_LOSS_USD', '4000'));
             if (dailyStop > 0) {
                 const pnl = await this.getTodayPnl();
+                trace.guards.daily_pnl_usd = pnl;
                 if (pnl === null) {
                     // เช็ค P&L วันนี้ไม่ได้เลย = คุม daily stop ไม่ได้ -> ห้ามเทรด
                     return (archResult = finish(
                         null,
-                        'skipped: เช็ค P&L วันนี้ไม่ได้ (deal list timeout 2 ครั้ง) — ไม่เทรดจนกว่าจะเช็คได้',
+                        "skipped: could not check today's P&L (deal list timed out twice) — no trading until it can be checked",
                     ));
                 }
                 if (pnl <= -dailyStop) {
@@ -1477,12 +1756,20 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const cooldownBars = parseInt(this.cfg('GOLD_LOSS_COOLDOWN_BARS', '3'), 10);
             if (cooldownBars > 0 && !force) {
                 const lastLossTs = await this.getLastLossCloseTs(symbolId);
+                trace.guards.last_loss_close_utc = lastLossTs ? new Date(lastLossTs).toISOString() : null;
+                if (lastLossTs === undefined) {
+                    // cannot tell whether a loss just closed: skip this round rather than drop the guard
+                    return (archResult = finish(
+                        null,
+                        'skipped: could not check recent losses (deal list unavailable) — no trading until it can be checked',
+                    ));
+                }
                 const cooldownMs = cooldownBars * cfg.periodMin * 60_000;
                 if (lastLossTs && Date.now() - lastLossTs < cooldownMs) {
                     const waitMin = Math.ceil((cooldownMs - (Date.now() - lastLossTs)) / 60_000);
                     return (archResult = finish(
                         null,
-                        `skipped: loss cooldown — เพิ่งโดน SL, รออีก ${waitMin} นาที (${cooldownBars} แท่ง ${cfg.periodMin}m)`,
+                        `skipped: loss cooldown — SL was just hit, waiting ${waitMin} more min (${cooldownBars} bars of ${cfg.periodMin}m)`,
                     ));
                 }
             }
@@ -1509,10 +1796,11 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 }
                 sizeCap = 'half';
             }
+            trace.guards.size_cap = sizeCap;
 
             // analysis — GOLD_ENGINE=ta (default): rule-based TA from the pulled
             // indicators (playbook per mode) · =ai: Claude via ANTHROPIC_API_KEY
-            const engine = this.configService.get<string>('GOLD_ENGINE', 'ta').toLowerCase();
+            const engine = this.engine();
             let decision: GoldDecision;
             if (engine === 'ai') {
                 decision = await this.goldAiService.analyze(
@@ -1524,14 +1812,17 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     },
                     p,
                 );
+                trace.base_decision = structuredClone(decision);
             } else {
                 if (!data.series) throw new Error('TA engine requires locally-built series (GOLD_DATA_SOURCE=local)');
                 decision = this.goldTaService.analyze(mode, data.series, { rrMin: cfg.rrMin, sizeCap, profile: p });
+                trace.base_decision = structuredClone(decision);
 
                 // AI assist — ชั้นเสริมบน TA (เปิด/ปิดได้จากหน้า start loop)
                 // ปิดอยู่ / ไม่มีคีย์ / AI ล่ม = ใช้ผล TA เดิมต่อ ไม่สะดุด
                 // prompt ปรับตามตราสาร+โหมด และแนบข่าวที่กรองตาม keyword ของตราสาร
                 let aiMode = this.aiMode();
+                const aiOnly = aiMode === 'ai_only';
 
                 // เพดานการเรียก AI ต่อวัน — ชนแล้วสลับเป็น TA ล้วนอัตโนมัติ "เฉพาะรอบนี้"
                 // ระบบไม่หยุด ไม่ error · สวิตช์บน dashboard ยังเป็น lead/assist เหมือนเดิม
@@ -1543,11 +1834,11 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                         if (!this.aiQuotaWarnedDay.has(u.date_utc)) {
                             this.aiQuotaWarnedDay.add(u.date_utc);
                             this.logger.warn(
-                                `โควตา AI วันนี้เต็ม (${u.used}/${aiMaxCalls}) — สลับเป็น TA ล้วนจนกว่าจะข้ามวันหรือกดรีเซ็ต`,
+                                `Today's AI quota is full (${u.used}/${aiMaxCalls}) — switching to TA only until the next day or a manual reset`,
                             );
                             this.activity.push(
                                 'warn',
-                                `⚠ โควตา AI เต็ม ${u.used}/${aiMaxCalls} ครั้งวันนี้ — บอทสลับไปใช้ TA ล้วนอัตโนมัติ (ยังเทรดต่อปกติ)`,
+                                `⚠ AI quota full ${u.used}/${aiMaxCalls} calls today — the bot switched to TA only automatically (still trading normally)`,
                                 `${p.key}/${mode}`,
                             );
                         }
@@ -1557,12 +1848,58 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
 
                 // โหมด lead: TA ไม่เจอ setup → ให้ AI หาไม้เอง (ไม้ที่ได้ต้องผ่านด่านเข้มกว่า)
                 // แต่ไม่ถามทุกรอบ — ผ่านประตู near-miss ก่อน (ดู aiGate())
+                trace.guards.ai_mode_this_round = aiMode;
                 const gateCheck =
                     aiMode === 'lead' && decision.order_type === 'NO_TRADE'
                         ? this.shouldAskAiForSetup(decision)
                         : { ask: false, why: '' };
-                if (aiMode === 'lead' && decision.order_type === 'NO_TRADE' && !gateCheck.ask) {
-                    this.logger.log(`[${mode}] ข้าม AI: ${gateCheck.why}`);
+                if (aiOnly) {
+                    // AI-only (Gemini): the AI proposes every round and TA is not used for the trade.
+                    // The proposal passes the same guards as lead mode (half size max, R:R, ATR, market side,
+                    // strictness), then min confidence and the risk budget below. Out of quota = no trade,
+                    // not a silent switch to TA.
+                    if (aiMode === 'off') {
+                        decision = {
+                            ...decision,
+                            order_type: 'NO_TRADE',
+                            entry: null,
+                            sl: null,
+                            tp1: null,
+                            tp2: null,
+                            rr_tp1: null,
+                            reason: 'AI quota is used up for today (AI-only mode) — no trade',
+                        };
+                        st.lastAssist = null;
+                    } else {
+                        const news = await this.newsForAssist(p, p.modes[mode]?.news ?? 15);
+                        const gotQuota = this.goldGeminiService.tryConsume(aiMaxCalls);
+                        const proposal = gotQuota
+                            ? await this.goldGeminiService.propose(
+                                  mode,
+                                  data.series ?? null,
+                                  {
+                                      rrMin: cfg.rrMin,
+                                      openPositions: openPositions.summary,
+                                      sizeCap,
+                                      dailyPnlUsd: this.pnlCache?.value ?? null,
+                                  },
+                                  { profile: p, news },
+                              )
+                            : null;
+                        decision = this.applyProposal(
+                            proposal,
+                            cfg.rrMin,
+                            sizeCap,
+                            p,
+                            data.series ?? null,
+                            mode,
+                            'ai_only',
+                        );
+                        st.lastAssist = (proposal as any) ?? null;
+                        trace.ai_answer = proposal ?? null;
+                    }
+                } else if (aiMode === 'lead' && decision.order_type === 'NO_TRADE' && !gateCheck.ask) {
+                    this.logger.log(`[${mode}] skipping AI: ${gateCheck.why}`);
                     st.lastAssist = null;
                 } else if (aiMode === 'lead' && decision.order_type === 'NO_TRADE') {
                     const news = await this.newsForAssist(p, p.modes[mode]?.news ?? 15);
@@ -1571,7 +1908,9 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     // หักไม่ได้ = ส่ง null ต่อ ซึ่งเป็นทาง "ไม่มี AI" ที่มีอยู่แล้ว (TA ล้วน)
                     const gotQuota = this.goldGeminiService.tryConsume(aiMaxCalls);
                     if (!gotQuota)
-                        this.logger.warn(`[${p.key}/${mode}] โควตา AI หมดพอดีตอนจะเรียก — ใช้ TA ล้วนรอบนี้`);
+                        this.logger.warn(
+                            `[${p.key}/${mode}] AI quota ran out right before the call — TA only this round`,
+                        );
                     const proposal = gotQuota
                         ? await this.goldGeminiService.propose(
                               mode,
@@ -1589,12 +1928,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     if (led.order_type !== 'NO_TRADE') {
                         this.activity.push(
                             'warn',
-                            `🤖 AI หาไม้เองได้ (TA ไม่เจอ): ${led.order_type} @ ${fmtPrice(p, led.entry!)} · ${led.playbook_ref}`,
+                            `🤖 AI found a trade itself (TA found none): ${led.order_type} @ ${fmtPrice(p, led.entry!)} · ${led.playbook_ref}`,
                             `${p.key}/${mode}`,
                         );
                     }
                     decision = led;
                     st.lastAssist = (proposal as any) ?? null;
+                    trace.ai_answer = proposal ?? null;
                 } else if (aiMode !== 'off' && decision.order_type !== 'NO_TRADE') {
                     const news = await this.newsForAssist(p, p.modes[mode]?.news ?? 15);
                     // โควตาอาจหมดระหว่าง await news (หลายตราสาร x หลายโหมดยิงพร้อมกัน
@@ -1602,7 +1942,9 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     // หักไม่ได้ = ส่ง null ต่อ ซึ่งเป็นทาง "ไม่มี AI" ที่มีอยู่แล้ว (TA ล้วน)
                     const gotQuota = this.goldGeminiService.tryConsume(aiMaxCalls);
                     if (!gotQuota)
-                        this.logger.warn(`[${p.key}/${mode}] โควตา AI หมดพอดีตอนจะเรียก — ใช้ TA ล้วนรอบนี้`);
+                        this.logger.warn(
+                            `[${p.key}/${mode}] AI quota ran out right before the call — TA only this round`,
+                        );
                     const assist = gotQuota
                         ? await this.goldGeminiService.assist(
                               mode,
@@ -1622,12 +1964,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     if (!assist) {
                         this.activity.push(
                             'warn',
-                            `⚠ AI assist ไม่ตอบรอบนี้ — ใช้ผล TA ล้วน (ดู log หาสาเหตุ: คีย์/timeout/schema)`,
+                            `⚠ AI assist did not answer this round — using the TA result only (check the log for the cause: key/timeout/schema)`,
                             `${p.key}/${mode}`,
                         );
                     }
                     decision = this.applyAssist(decision, assist, cfg.rrMin, p);
                     st.lastAssist = assist;
+                    trace.ai_answer = assist ?? null;
                 } else {
                     st.lastAssist = null;
                 }
@@ -1663,12 +2006,12 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             // (Claude skill) — /gold/confirm executes it within PENDING_TTL_MS
             if (dryRun) {
                 const id = randomUUID().slice(0, 8);
-                this.pending.set(this.sk(mode, p), { id, decision, sizeCap, createdAt: Date.now() });
+                this.pending.set(this.sk(mode, p), { id, decision, sizeCap, createdAt: Date.now(), trace });
                 return (archResult = finish(decision, `awaiting-approval:${id}`));
             }
 
             // place the order
-            const uuid = await this.placeOrder(mode, decision, sizeCap, p, symbolId);
+            const uuid = await this.placeOrder(mode, decision, sizeCap, p, symbolId, trace);
             await this.notify(mode, decision, `ORDER SENT (${uuid})`, p);
             return (archResult = finish(decision, `order sent: ${uuid}`));
         } catch (e) {
@@ -1678,7 +2021,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             return (archResult = { decision: st.lastDecision, outcome: `error: ${errorMessage(e)}` });
         } finally {
             // เก็บประวัติทุกรอบเป็น .json ใน /archive (วันเวลา UTC + ไทย)
-            this.archiveRound(mode, archData, archResult, p);
+            trace.market = this.tickSnapshot(p);
+            this.archiveRound(mode, archData, archResult, p, trace);
         }
     }
 
@@ -1689,7 +2033,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const items = await Promise.race([this.goldBuilderService.fetchNews(limit, p), timeout]);
             return Array.isArray(items) ? items : [];
         } catch (e) {
-            this.logger.warn(`news for AI assist failed (${errorMessage(e)}) — ส่ง prompt โดยไม่มีข่าว`);
+            this.logger.warn(`news for AI assist failed (${errorMessage(e)}) — sending the prompt without news`);
             return [];
         }
     }
@@ -1744,7 +2088,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             throw e;
         }
 
-        const uuid = await this.placeOrder(mode, p.decision, p.sizeCap, prof, symbolId);
+        const uuid = await this.placeOrder(mode, p.decision, p.sizeCap, prof, symbolId, p.trace);
         const st = this.getState(mode, prof);
         st.lastOutcome = `order sent after approval: ${uuid}`;
         const archiveFile = (p as any).archiveFile;
@@ -1781,6 +2125,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         data: GoldExport | null,
         result: { decision: GoldDecision | null; outcome: string } | null,
         p: InstrumentProfile = this.profile,
+        trace: RoundTrace | null = null,
     ) {
         try {
             const tailN = parseInt(this.configService.get<string>('GOLD_ARCHIVE_BARS', '260'), 10);
@@ -1799,12 +2144,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             }
             const file = this.goldArchiveService.save(mode, {
                 instrument: p.key,
-                engine: this.configService.get<string>('GOLD_ENGINE', 'ta'),
+                engine: this.engine(),
                 ai_assist: this.aiAssistEnabled(),
                 outcome: result?.outcome ?? 'unknown',
                 decision: result?.decision ?? null,
                 data_errors: data?.errors ?? null,
                 series_meta: seriesMeta,
+                ...(trace ? { context: trace } : {}),
                 ...(tailN > 0 && Object.keys(seriesTail).length ? { series_tail: seriesTail } : {}),
             });
 
@@ -1865,11 +2211,11 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const source = this.configService.get<string>('GOLD_DATA_SOURCE', 'local').toLowerCase();
         // ข่าวฝังใน formula มีไว้ให้ AI engine อ่านเท่านั้น — TA อ่านตัวเลขอย่างเดียว
         // จึงไม่เสียเวลาดึง RSS ในโหมดปกติ (Claude ดูข่าวผ่าน GET /gold/news แทน)
-        const withNews = this.configService.get<string>('GOLD_ENGINE', 'ta').toLowerCase() === 'ai';
+        const withNews = this.engine() === 'ai';
         if (source === 'remote') {
             // ZIP จาก z-service มีแต่ชุดทอง — ตราสารอื่นต้องสร้างข้อมูลในตัวเท่านั้น
             if (p.key !== 'XAUUSD')
-                throw new Error(`GOLD_DATA_SOURCE=remote รองรับเฉพาะ XAUUSD — ${p.key} ต้องใช้ local`);
+                throw new Error(`GOLD_DATA_SOURCE=remote supports XAUUSD only — ${p.key} must use local`);
             return this.goldDataService.fetchExport(mode);
         }
         return this.goldBuilderService.build(mode, withNews, p);
@@ -1903,17 +2249,17 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             if (min >= b.from && min < b.to) return b.label_th;
         }
         if (p.session.fridayCutoff != null && dow === 5 && min >= p.session.fridayCutoff) {
-            return 'Friday บ่าย ET — งดไม้ใหม่ก่อนปิดสัปดาห์';
+            return 'Friday afternoon ET — no new trades before the weekly close';
         }
         if (mode === 'scalp') {
             const inWindow = p.session.scalpWindows.some(([a, b]) => min >= a && min < b);
             if (!inWindow) {
-                return `นอกหน้าต่าง scalp (${p.session.scalpWindows.map(([a, b]) => `${hhmm(a)}-${hhmm(b)} ET`).join(' / ')})`;
+                return `outside the scalp window (${p.session.scalpWindows.map(([a, b]) => `${hhmm(a)}-${hhmm(b)} ET`).join(' / ')})`;
             }
         }
         if (mode === 'intraday') {
             const [a, b] = p.session.intradayWindow;
-            if (!(min >= a && min < b)) return `นอกหน้าต่าง intraday (${hhmm(a)}–${hhmm(b)} ET)`;
+            if (!(min >= a && min < b)) return `outside the intraday window (${hhmm(a)}–${hhmm(b)} ET)`;
         }
         return null;
     }
@@ -1947,7 +2293,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             for (const o of pending) {
                 const side = o.tradeData?.tradeSide === 1 ? 'BUY' : 'SELL';
                 const px = o.limitPrice ?? o.stopPrice ?? '-';
-                parts.push(`(รอ) ${side} ${lotsOf(o.tradeData)} lots @ ${px}`);
+                parts.push(`(pending) ${side} ${lotsOf(o.tradeData)} lots @ ${px}`);
             }
             return { count: mine.length + pending.length, summary: parts.join(' | ') };
         } catch (e) {
@@ -1975,10 +2321,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     }
 
     /**
-     * P&L ของวันนี้ (UTC day) — retry 2 ครั้งก่อนยอมแพ้ เพราะ ProtoOADealListReq
-     * ช้าเป็นพัก ๆ (14 ส.ค. 2569: timeout 7 รอบ = รอบตายฟรีทั้งที่ยังไม่วิเคราะห์)
-     * ล้มทั้งสองครั้ง -> ใช้ค่าที่แคชไว้ถ้ายังสด, ไม่งั้นคืน null = เช็คไม่ได้
-     * (ผู้เรียกต้อง fail-closed: ไม่รู้ P&L = ห้ามเทรด เพราะ daily stop คุมไม่ได้)
+     * P&L of the UTC day (from the last daily-stop reset, if any), from the shared deal cache.
+     * `null` = cannot be checked: the caller must fail closed (unknown P&L = no trading).
      */
     private async getTodayPnl(): Promise<number | null> {
         const now = new Date();
@@ -1987,45 +2331,22 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         // แต่ไม้ที่ปิด "หลัง" จุดนั้นยังนับปกติ = ด่านยังทำงานต่อ ตัดซ้ำได้ถ้าขาดทุนใหม่ถึงเพดาน
         const reset = this.activeDailyStopReset();
         const from = reset ? Math.max(midnight, reset.ts) : midnight;
-        const timeouts = [20_000, 30_000];
-
-        for (let attempt = 0; attempt < timeouts.length; attempt++) {
-            try {
-                const dealsRes = await this.ctraderService.getDealList(from, now.getTime(), timeouts[attempt]);
-                let pnl = 0;
-                for (const deal of (dealsRes?.deal ?? []) as any[]) {
-                    const d = deal.closePositionDetail;
-                    if (!d) continue;
-                    const divisor = Math.pow(10, deal.moneyDigits || 2);
-                    const val = (v: any) => (typeof v === 'number' ? v : (v?.low ?? 0));
-                    pnl += (val(d.grossProfit) + val(d.commission) + val(d.swap)) / divisor;
-                }
-                this.pnlCache = { value: pnl, ts: Date.now() };
-                return pnl;
-            } catch (e) {
-                const last = attempt === timeouts.length - 1;
-                this.logger.warn(
-                    `getTodayPnl attempt ${attempt + 1}/${timeouts.length} failed: ${errorMessage(e)}${last ? '' : ' — retrying'}`,
+        try {
+            const { deals, stale, ageMs } = await this.deals.closedSince(from);
+            const pnl = deals.reduce((sum, d) => sum + d.netUsd, 0);
+            if (stale) {
+                this.activity.push(
+                    'warn',
+                    `deal list unavailable — using P&L ${pnl.toFixed(2)} USD from ${Math.round(ageMs / 60_000)} min ago`,
+                    this.currentMode,
                 );
-                if (!last) await new Promise((r) => setTimeout(r, 2_000));
             }
+            this.pnlCache = { value: pnl, ts: Date.now() - ageMs };
+            return pnl;
+        } catch (e) {
+            this.logger.warn(`getTodayPnl failed: ${errorMessage(e)}`);
+            return null;
         }
-
-        // fallback: ค่าล่าสุดที่ดึงสำเร็จ ถ้าไม่เกิน 10 นาที (ไม้ปิดใหม่ในช่วงนั้นยัง
-        // ถูกจับได้จาก loss cooldown อีกชั้น) — เกินนั้นถือว่าเช็คไม่ได้
-        if (this.pnlCache && Date.now() - this.pnlCache.ts < PNL_CACHE_TTL_MS) {
-            const ageMin = Math.round((Date.now() - this.pnlCache.ts) / 60_000);
-            this.logger.warn(
-                `getTodayPnl: ใช้ค่าที่แคชไว้ ${this.pnlCache.value.toFixed(2)} USD (เก่า ${ageMin} นาที)`,
-            );
-            this.activity.push(
-                'warn',
-                `deal list ช้า — ใช้ P&L ที่แคชไว้ ${this.pnlCache.value.toFixed(2)} USD (เก่า ${ageMin} นาที)`,
-                this.currentMode,
-            );
-            return this.pnlCache.value;
-        }
-        return null;
     }
 
     private validateDecision(d: GoldDecision, rrMin: number): string | null {
@@ -2056,7 +2377,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * (3) แท่งล่าสุดยังสด ไม่ใช่ข้อมูลค้างจากรอบก่อน/ตลาดปิด
      */
     private checkDataIntegrity(mode: GoldMode, data: GoldExport, p: InstrumentProfile = this.profile): string | null {
-        if (!data.series) return null; // remote ZIP path — ไม่มี series ให้ตรวจ
+        if (!data.series) return null; // remote ZIP path — no series to check
         const required = p.modes[mode].sets.filter((s) => s.symbol === p.key);
         const staleMult = parseFloat(this.configService.get<string>('GOLD_MAX_BAR_AGE_MULT', '3'));
 
@@ -2064,11 +2385,11 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const key = seriesKey(p, tf);
             const bars = data.series[key];
             if (!bars?.length) {
-                return `ข้อมูล ${p.key} ${tf} ดึงไม่ได้ — ห้ามเทรดรอบนี้ (${data.errors ?? 'ไม่ทราบสาเหตุ'})`;
+                return `Could not fetch ${p.key} ${tf} data — no trading this round (${data.errors ?? 'unknown cause'})`;
             }
             const minBars = Math.min(60, nBars);
             if (bars.length < minBars) {
-                return `${p.key} ${tf} ได้แค่ ${bars.length}/${minBars} แท่ง — ข้อมูลไม่พอวิเคราะห์`;
+                return `${p.key} ${tf} has only ${bars.length}/${minBars} bars — not enough data to analyze`;
             }
             const ageMs = Date.now() - bars[bars.length - 1].ts;
             // TF รายวัน/รายสัปดาห์: ต้องเผื่อช่วงที่ตลาดปิด ไม่งั้นเช้าวันจันทร์
@@ -2078,7 +2399,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             const maxAge = INTERVAL_MS[tf] * staleMult + weekendAllowance;
             if (ageMs > maxAge) {
                 const mins = Math.round(ageMs / 60_000);
-                return `แท่งล่าสุดของ ${p.key} ${tf} เก่า ${mins} นาที (เกิน ${staleMult}×TF) — ข้อมูลค้าง/ตลาดปิด ห้ามเทรด`;
+                return `Latest ${p.key} ${tf} bar is ${mins} min old (over ${staleMult}×TF) — stale data/market closed, no trading`;
             }
         }
         return null;
@@ -2100,7 +2421,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         // มูลค่าต่อ 1.0 หน่วยราคา ต่อ lot: ทอง $100 · EURUSD $100,000 · USDJPY 100,000/ราคา
         const actualRisk = Math.abs(d.entry - d.sl) * usdPerUnitMovePerLot(p, d.entry) * lots;
         if (actualRisk > riskUsd * tolerance) {
-            return `SL กว้าง ${fmtPrice(p, Math.abs(d.entry - d.sl))} → เสี่ยงจริง $${actualRisk.toFixed(0)} ที่ ${lots} lot เกินงบ $${riskUsd} (min lot 0.01 ก็ยังเกิน)`;
+            return `SL width ${fmtPrice(p, Math.abs(d.entry - d.sl))} → actual risk $${actualRisk.toFixed(0)} at ${lots} lot exceeds the budget $${riskUsd} (even the 0.01 min lot exceeds it)`;
         }
         return null;
     }
@@ -2136,6 +2457,17 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         sl?: number | null,
         p: InstrumentProfile = this.profile,
     ): number {
+        return this.sizeOrder(size, cap, entry, sl, p).lots;
+    }
+
+    /** lot size and every input that produced it (recorded on the order for backtests) */
+    private sizeOrder(
+        size: GoldSize,
+        cap: GoldSize | null,
+        entry?: number | null,
+        sl?: number | null,
+        p: InstrumentProfile = this.profile,
+    ): RoundSizing {
         const factor: Record<GoldSize, number> = { full: 1, half: 0.5, quarter: 0.25 };
         const capOrder: Record<GoldSize, number> = { quarter: 1, half: 2, full: 3 };
         const effective: GoldSize = cap && capOrder[cap] < capOrder[size] ? cap : size;
@@ -2143,41 +2475,51 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const sizing = this.cfg('GOLD_SIZING', 'risk').toLowerCase();
 
         let lots: number;
+        let riskUsd: number | null = null;
+        let perUnit: number | null = null;
         const slDist = entry != null && sl != null ? Math.abs(entry - sl) : 0;
         if (sizing === 'risk' && slDist > 0) {
             // fixed-risk sizing (consensus best practice): ทุกไม้เสี่ยง $ เท่ากัน
             // ไม่ว่า SL กว้างแค่ไหน — post-mortem เดิม: fixed lots ทำให้ไม้ position
             // (SL 314$) เสี่ยงเงินมากกว่าไม้ intraday (SL 17$) ถึง ~18 เท่า
             // XAUUSD: 1 lot = 100 oz → $1 move = $100/lot · FX: 1 lot = 100k → 1 pip = $10 (USD-quoted)
-            const riskUsd = parseFloat(this.cfg('GOLD_RISK_USD_PER_TRADE', '1500'));
-            lots = (riskUsd * factor[effective]) / (slDist * usdPerUnitMovePerLot(p, entry!));
+            riskUsd = parseFloat(this.cfg('GOLD_RISK_USD_PER_TRADE', '1500'));
+            perUnit = usdPerUnitMovePerLot(p, entry!);
+            lots = (riskUsd * factor[effective]) / (slDist * perUnit);
         } else {
             const base = parseFloat(this.cfg('GOLD_BASE_LOT', '0.1'));
             lots = base * factor[effective];
         }
-        return Math.min(maxLot, Math.max(0.01, Math.round(lots * 100) / 100));
+        return {
+            method: sizing === 'risk' && slDist > 0 ? 'risk' : 'fixed',
+            size,
+            size_cap: cap,
+            effective_size: effective,
+            sl_distance: slDist,
+            risk_usd: riskUsd,
+            usd_per_unit_per_lot: perUnit,
+            raw_lots: lots,
+            max_lot: maxLot,
+            lots: Math.min(maxLot, Math.max(0.01, Math.round(lots * 100) / 100)),
+        };
     }
 
-    /** most recent losing close on this instrument within 24h (for the loss cooldown) */
-    private async getLastLossCloseTs(symbolId: number): Promise<number | null> {
+    /**
+     * Time of the latest losing close on this symbol in the last 24 h; `null` = none.
+     * `undefined` = could not be checked: the cooldown guard must then NOT assume "no recent loss".
+     */
+    private async getLastLossCloseTs(symbolId: number): Promise<number | null | undefined> {
         try {
-            const now = Date.now();
-            const res = await this.ctraderService.getDealList(now - 24 * 3_600_000, now);
-            const num = (v: any) => (typeof v === 'number' ? v : Number(v?.toString?.() ?? v ?? 0));
+            const { deals } = await this.deals.closedSince(Date.now() - 24 * 3_600_000);
             let last: number | null = null;
-            for (const deal of (res?.deal ?? []) as any[]) {
-                const det = deal.closePositionDetail;
-                if (!det) continue;
-                if (num(deal.symbolId) !== symbolId) continue;
-                const divisor = Math.pow(10, num(deal.moneyDigits) || 2);
-                const net = (num(det.grossProfit) + num(det.commission) + num(det.swap)) / divisor;
-                const ts = num(deal.executionTimestamp);
-                if (net < 0 && (!last || ts > last)) last = ts;
+            for (const d of deals) {
+                if (d.symbolId !== symbolId || d.netUsd >= 0) continue;
+                if (!last || d.closedAt > last) last = d.closedAt;
             }
             return last;
         } catch (e) {
             this.logger.warn(`getLastLossCloseTs failed: ${errorMessage(e)}`);
-            return null;
+            return undefined;
         }
     }
 
@@ -2187,6 +2529,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         sizeCap: GoldSize | null,
         p: InstrumentProfile,
         symbolId: number,
+        trace: RoundTrace | null = null,
     ): Promise<string> {
         // one working pending order per mode per instrument — a new round REPLACES the previous
         // order instead of stacking on top of it (post-mortem: stacked limits
@@ -2209,7 +2552,9 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const uuid = `gold-${mode}-${randomUUID()}`;
         const side = d.order_type.startsWith('BUY') ? 'BUY' : 'SELL';
         const orderType = d.order_type.endsWith('LIMIT') ? 'LIMIT' : 'STOP';
-        const volume = this.resolveVolume(d.size, sizeCap, d.entry, d.sl, p);
+        const sizing = this.sizeOrder(d.size, sizeCap, d.entry, d.sl, p);
+        const volume = sizing.lots;
+        if (trace) trace.sizing = sizing;
 
         if (mode === 'scalp') {
             const n = this.scalpsToday(p);
@@ -2219,8 +2564,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const orderParams: any = {
             uuid,
             symbol: p.symbolName,
-            symbolId, // ExecutionService ใช้ตัวนี้ได้เลย ไม่ต้องค้นชื่อซ้ำ
-            unitsPerLot: p.unitsPerLot, // ทอง 100 oz · FX 100,000
+            symbolId, // ExecutionService uses this directly, no name lookup needed
+            unitsPerLot: p.unitsPerLot, // gold 100 oz · FX 100,000
             side,
             orderType,
             volume,
@@ -2247,15 +2592,32 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             mode: mode.toUpperCase(),
             status: 'PENDING',
             message: `${d.order_type} rr=${d.rr_tp1} conf=${d.confidence} ${d.playbook_ref} | ${d.reason}`,
-            engine: this.configService.get<string>('GOLD_ENGINE', 'ta'),
+            engine: this.engine(),
             reason: d.reason,
             playbookRef: d.playbook_ref,
             invalidation: d.invalidation,
             tp2: d.tp2 ?? undefined,
             rrTp1: d.rr_tp1 ?? undefined,
             confidence: d.confidence,
-            analysisSummary: d.analysis_summary_th,
+            analysisSummary: d.analysis_summary,
+            ...(trace
+                ? {
+                      configHash: trace.config_hash,
+                      riskProfile: trace.config.risk_profile
+                          ? `${trace.config.risk_profile.name}${trace.config.risk_profile.modified ? ' (modified)' : ''}`
+                          : 'custom',
+                      context: { ...trace, market: this.tickSnapshot(p) },
+                  }
+                : {}),
         });
+        if (trace) {
+            const r = trace.config;
+            this.activity.push(
+                'ok',
+                `order ${uuid.slice(-8)} · ${sizing.lots} lot · profile ${r.risk_profile?.name ?? 'custom'}${r.risk_profile?.modified ? '*' : ''} · risk $${r.risk.risk_usd_per_trade} · ${r.engine === 'ai' ? 'Claude engine' : `AI ${trace.guards.ai_mode_this_round ?? r.ai.mode_effective}`} (${r.ai.model}, ${r.ai.thinking}, ${r.ai.strictness}) · config ${trace.config_hash}`,
+                `${p.key}/${mode}`,
+            );
+        }
 
         await this.executionService.executeOrder(orderParams);
         return uuid;
@@ -2266,16 +2628,16 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             `${p.emoji} <b>[${p.key} ${mode.toUpperCase()}] ${headline}</b>`,
             d.order_type !== 'NO_TRADE'
                 ? `${d.order_type} @ ${d.entry} | SL ${d.sl} | TP1 ${d.tp1}${d.tp2 ? ` | TP2 ${d.tp2}` : ''} | R:R ${d.rr_tp1} | conf ${d.confidence}/10 | size ${d.size}`
-                : // reason/invalidation/analysis_summary_th อุ้มข้อความอิสระจาก AI มาด้วย
-                  // (applyAssist/applyProposal ยัด ai.reason_th, pr.invalidation_th ฯลฯ ลงไป)
+                : // reason/invalidation/analysis_summary carry free text from the AI
+                  // (applyAssist/applyProposal ยัด ai.reason, pr.invalidation ฯลฯ ลงไป)
                   // ไม่ escape = ตัว < > & ตัวเดียวทำให้ Telegram ทิ้งทั้งข้อความ
                   // = ออเดอร์ยิงจริงแต่ไม่มีใครรู้ (บั๊กเดียวกับที่เคยแก้ไปแล้วรอบหนึ่ง)
-                  `เหตุผล: ${this.esc(d.reason)}`,
+                  `Reason: ${this.esc(d.reason)}`,
             d.invalidation ? `❌ Invalidation: ${this.esc(d.invalidation)}` : '',
             ...this.assistLines(d),
             d.valid_until_utc ? `⏳ valid until ${this.esc(d.valid_until_utc)}` : '',
             '',
-            this.esc(d.analysis_summary_th),
+            this.esc(d.analysis_summary),
         ].filter(Boolean);
         await this.telegramService.notifyOrderSuccess(lines.join('\n'));
     }

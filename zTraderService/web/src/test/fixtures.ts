@@ -29,7 +29,7 @@ export function session(role: Role, over: Partial<User> = {}): AuthPayload {
 
 export const XAU: InstrumentListItem = {
   key: 'XAUUSD',
-  name_th: 'ทองคำ',
+  name_th: 'Gold',
   emoji: '🥇',
   kind: 'metal',
   digits: 2,
@@ -43,7 +43,7 @@ export const XAU: InstrumentListItem = {
 
 export const EUR: InstrumentListItem = {
   key: 'EURUSD',
-  name_th: 'ยูโร/ดอลลาร์',
+  name_th: 'Euro / US dollar',
   emoji: '🇪🇺',
   kind: 'fx',
   digits: 5,
@@ -58,7 +58,7 @@ export const EUR: InstrumentListItem = {
 export const JPY: InstrumentListItem = {
   ...EUR,
   key: 'USDJPY',
-  name_th: 'ดอลลาร์/เยน',
+  name_th: 'US dollar / Yen',
   emoji: '🇯🇵',
   digits: 3,
   pip: 0.01,
@@ -74,12 +74,12 @@ export const instruments: InstrumentsResponse = {
 export const modes: ModesResponse = {
   source: 'local',
   instrument: 'XAUUSD',
-  name_th: 'ทองคำ',
+  name_th: 'Gold',
   emoji: '🥇',
   modes: [
     {
       mode: 'scalp',
-      horizon: '1–4 ชม.',
+      horizon: '1–4 h',
       tf_roles: '5m',
       ttl: 60,
       rr_min: 1.5,
@@ -87,7 +87,7 @@ export const modes: ModesResponse = {
     },
     {
       mode: 'swing',
-      horizon: 'หลายวัน',
+      horizon: 'several days',
       tf_roles: '1d',
       ttl: 300,
       rr_min: 2,
@@ -132,7 +132,7 @@ export function status(over: Partial<BotStatus> = {}): BotStatus {
     ctraderAuthorized: true,
     market: {
       open: true,
-      reason: 'ตลาดทองเปิด (10:00 ET)',
+      reason: 'Gold market open (10:00 ET)',
       phase: 'open',
       et_time: '10:00',
       next_open_utc: null,
@@ -170,7 +170,7 @@ export function settings(over: Partial<BotSettings> = {}): BotSettings {
     ai: {
       model: 'gemini-3.5-flash',
       thinking_level: 'low',
-      thinking: 'ระดับ low',
+      thinking: 'level low',
       temperature: 0.2,
       top_k: 40,
       top_p: 0.95,
@@ -182,5 +182,184 @@ export function settings(over: Partial<BotSettings> = {}): BotSettings {
     instrument: status().instrument,
     overridden: [],
     ...over,
+  };
+}
+
+export const riskProfiles = {
+  balance: 10_000,
+  active: null,
+  profiles: [
+    {
+      id: 'builtin:balanced',
+      name: 'Balanced',
+      description: '1% risk per trade',
+      builtIn: true,
+      values: {
+        risk_per_trade: { unit: 'pct' as const, value: 1 },
+        daily_max_loss: { unit: 'pct' as const, value: 4 },
+        max_open_positions: 4,
+        max_open_positions_total: 6,
+        min_confidence: 7,
+        loss_cooldown_bars: 3,
+        scalp_max_per_day: 8,
+      },
+      resolved: {
+        risk_usd_per_trade: 100,
+        daily_max_loss_usd: 400,
+        max_open_positions: 4,
+        max_open_positions_total: 6,
+        min_confidence: 7,
+        loss_cooldown_bars: 3,
+        scalp_max_per_day: 8,
+      },
+      createdBy: null,
+      updatedAt: null,
+    },
+    {
+      id: 'builtin:micro',
+      name: 'Micro account',
+      description: '$10 risk',
+      builtIn: true,
+      values: {
+        risk_per_trade: { unit: 'usd' as const, value: 10 },
+        daily_max_loss: { unit: 'usd' as const, value: 30 },
+        max_open_positions: 1,
+        max_open_positions_total: 1,
+        min_confidence: 7,
+        loss_cooldown_bars: 3,
+        scalp_max_per_day: 5,
+        max_lot: { XAUUSD: 0.01 },
+      },
+      resolved: {
+        risk_usd_per_trade: 10,
+        daily_max_loss_usd: 30,
+        max_open_positions: 1,
+        max_open_positions_total: 1,
+        min_confidence: 7,
+        loss_cooldown_bars: 3,
+        scalp_max_per_day: 5,
+        max_lot_xauusd: 0.01,
+      },
+      createdBy: null,
+      updatedAt: null,
+    },
+  ],
+};
+
+/** every read endpoint the shell polls, answered with fixtures */
+export function baseRoutes(): Record<string, unknown> {
+  return {
+    'GET /api/dashboard/status': status(),
+    'GET /api/dashboard/settings': settings(),
+    'GET /api/dashboard/instruments': instruments,
+    'GET /api/dashboard/modes': modes,
+    'GET /api/dashboard/positions': [],
+    'GET /api/dashboard/account': {
+      available: true,
+      accountId: 1234567,
+      mode: 'DEMO',
+      balance: 10_000,
+      currency: 'USD',
+      leverage: 500,
+      updatedAt: null,
+    },
+    'GET /api/dashboard/ai/models': {
+      current: 'gemini-3.5-flash',
+      provider: 'gemini',
+      has_gemini_key: true,
+      has_claude_key: false,
+      models: [
+        {
+          id: 'gemini-3.5-flash',
+          label: 'Gemini 3.5 Flash',
+          provider: 'gemini',
+          modes: ['assist', 'lead', 'ai_only'],
+        },
+      ],
+    },
+    'GET /api/dashboard/activity': { latest_id: 0, entries: [] },
+    'GET /api/dashboard/news': [],
+    'GET /api/dashboard/archive': [],
+    'GET /api/dashboard/history': {
+      days: 30,
+      instrument: 'XAUUSD',
+      account_mode: 'DEMO',
+      summary: { trades: 0, wins: 0, losses: 0, winrate: 0, net_usd: 0 },
+      with_h4_trend: { trades: 0, wins: 0, losses: 0, winrate: 0, net_usd: 0 },
+      against_h4_trend: {
+        trades: 0,
+        wins: 0,
+        losses: 0,
+        winrate: 0,
+        net_usd: 0,
+      },
+      by_strategy: {},
+      by_side: {
+        BUY: { trades: 0, wins: 0, losses: 0, winrate: 0, net_usd: 0 },
+        SELL: { trades: 0, wins: 0, losses: 0, winrate: 0, net_usd: 0 },
+      },
+      trades: [],
+    },
+    'GET /api/risk-profiles': riskProfiles,
+    'GET /api/chart/sources': {
+      symbol: 'XAUUSD',
+      sources: [
+        { id: 'ctrader', label: 'cTrader (account broker)', kind: 'broker' },
+        { id: 'tv:OANDA', label: 'OANDA', kind: 'tradingview' },
+      ],
+    },
+    'GET /api/chart/bars': {
+      symbol: 'XAUUSD',
+      source: 'ctrader',
+      tf: 'M15',
+      bars: [
+        {
+          time: 1_790_000_000,
+          open: 4000,
+          high: 4010,
+          low: 3995,
+          close: 4005,
+          volume: 100,
+        },
+        {
+          time: 1_790_000_900,
+          open: 4005,
+          high: 4012,
+          low: 4001,
+          close: 4008,
+          volume: 90,
+        },
+      ],
+    },
+    'GET /api/actor/state': {
+      available: true,
+      isRunning: false,
+      symbols: ['XAUUSD'],
+      mode: 'Sonic',
+      maxPositions: 2,
+      modes: ['Sonic', 'Scalper'],
+      symbolsLive: [
+        {
+          symbol: 'XAUUSD',
+          price: 4005,
+          rsi: 55.2,
+          ema: 4001,
+          lastUpdate: null,
+          hasReceived: false,
+        },
+      ],
+    },
+    'GET /api/actor/logs': {
+      latestId: 1,
+      entries: [
+        {
+          id: 1,
+          ts: '2026-10-30T10:00:00.000Z',
+          type: 'info',
+          message: '[Exec] 🔌 Connected to Market Data Gateway',
+          channel: 'system',
+        },
+      ],
+    },
   };
 }

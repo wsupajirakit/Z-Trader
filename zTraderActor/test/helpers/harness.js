@@ -17,6 +17,21 @@ export class StubEngine extends EventEmitter {
     getState() {
         return { ...this.state };
     }
+    getSnapshot() {
+        return {
+            ...this.getState(),
+            maxPositions: 1,
+            modes: ['Hardcode', 'Conservative', 'Swing', 'Merge', 'Sonic', 'Scalper'],
+            symbolsLive: this.state.symbols.map((symbol) => ({
+                symbol,
+                price: null,
+                rsi: null,
+                ema: null,
+                lastUpdate: null,
+                hasReceived: false,
+            })),
+        };
+    }
     start(symbols, mode) {
         this.calls.push(['start', symbols, mode]);
         this.state = { isRunning: true, symbols, mode };
@@ -31,9 +46,17 @@ export class StubEngine extends EventEmitter {
 
 /**
  * Starts the stub service and the actor (in-process, ephemeral ports) with a controllable clock.
- * @param {{ env?: Record<string,string>, loginRateLimit?: { windowMs: number, limit: number } }} [opts]
+ * @param {{
+ *   env?: Record<string,string>,
+ *   loginRateLimit?: { windowMs: number, limit: number },
+ *   machineRateLimit?: { windowMs: number, limit: number },
+ * }} [opts]
  */
-export async function startHarness({ env = {}, loginRateLimit = { windowMs: 60_000, limit: 1000 } } = {}) {
+export async function startHarness({
+    env = {},
+    loginRateLimit = { windowMs: 60_000, limit: 1000 },
+    machineRateLimit,
+} = {}) {
     const stub = await startStubService();
     const clock = {
         t: Date.parse('2026-01-01T00:00:00Z'),
@@ -44,7 +67,7 @@ export async function startHarness({ env = {}, loginRateLimit = { windowMs: 60_0
     };
     const config = loadConfig({ API_TRADER_URL: stub.url, API_KEY: STUB_API_KEY, ...env });
     const engine = new StubEngine();
-    const actor = createActor({ config, engine, now: clock.now, loginRateLimit });
+    const actor = createActor({ config, engine, now: clock.now, loginRateLimit, machineRateLimit });
     const { port } = await actor.listen(0, '127.0.0.1');
     const base = `http://127.0.0.1:${port}`;
 

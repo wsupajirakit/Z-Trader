@@ -13,6 +13,7 @@ import { GoldTaService } from './analysis/gold-ta.service';
 import { GoldArchiveService } from './records/gold-archive.service';
 import { GoldHistoryService } from './records/gold-history.service';
 import { GoldActivityService } from './records/gold-activity.service';
+import { DealCacheService } from './records/deal-cache.service';
 import { GoldAutomateService } from './gold-automate.service';
 import { GoldController } from './gold.controller';
 
@@ -28,6 +29,7 @@ import { GoldController } from './gold.controller';
         GoldArchiveService,
         GoldHistoryService,
         GoldActivityService,
+        DealCacheService,
         GoldAutomateService,
     ],
     controllers: [GoldController],

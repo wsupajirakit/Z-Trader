@@ -79,7 +79,7 @@ export class AuthController {
     @Delete('sessions/:id')
     @HttpCode(204)
     async revoke(@CurrentSession() p: SessionPrincipal, @Param() { id }: SessionIdParam) {
-        if (!(await this.sessions.revokeOwn(p.user.id, id))) throw new NotFoundException('ไม่พบ session นี้');
+        if (!(await this.sessions.revokeOwn(p.user.id, id))) throw new NotFoundException('Session not found');
     }
 
     @Post('sessions/revoke-others')

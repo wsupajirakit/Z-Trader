@@ -43,7 +43,7 @@ export class AuthGuard implements CanActivate {
 
         const token = readSessionToken(req, this.config.get<SecureSetting>('SESSION_COOKIE_SECURE', 'auto'));
         const principal = token ? await this.auth.principalFor(token) : null;
-        if (!principal) throw new UnauthorizedException('ต้องเข้าสู่ระบบก่อน');
+        if (!principal) throw new UnauthorizedException('Login required');
         if (principal.user.mustChangePassword && !flag(ALLOW_PENDING_PASSWORD)) {
             throw new ForbiddenException(PASSWORD_CHANGE_REQUIRED);
         }

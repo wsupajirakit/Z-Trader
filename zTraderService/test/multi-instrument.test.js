@@ -124,9 +124,9 @@ function fakeAuto(overrides = {}) {
         const TA = {
             order_type: 'BUY_LIMIT', entry: 1.0990, sl: 1.0970, tp1: 1.1040, tp2: 1.1080,
             rr_tp1: 2.5, confidence: 7, size: 'full', reason: 'r', playbook_ref: 'intraday #1',
-            invalidation: '', valid_until_utc: null, analysis_summary_th: '',
+            invalidation: '', valid_until_utc: null, analysis_summary: '',
         };
-        const AI = (o) => ({ verdict: 'ADJUST', entry: null, sl: null, tp1: null, tp2: null, size: 'full', confidence: null, key_levels: '', risk_note_th: '', reason_th: 'r', ...o });
+        const AI = (o) => ({ verdict: 'ADJUST', entry: null, sl: null, tp1: null, tp2: null, size: 'full', confidence: null, key_levels: '', risk_note: '', reason: 'r', ...o });
 
         // entry ที่ AI เสนอ (1.0995 ห่างจาก TA แค่ 0.0005 < driftCap 0.0010) ต่ำกว่าราคาตลาด EURUSD
         // ask (1.1001) = ถูกต้องสำหรับ BUY_LIMIT ถ้าโค้ดดันไปเทียบกับราคาทอง (4700) ผลจะกลับตาลปัตรทันที

@@ -6,6 +6,7 @@
 import { after, afterEach, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { ConflictException } from '@nestjs/common';
 import { getConnectionToken } from '@nestjs/mongoose';
@@ -148,18 +149,18 @@ describe('confirm a parked decision', () => {
         invalidation: '',
         valid_until_utc: null,
         reason: 'e2e',
-        analysis_summary_th: 'e2e',
+        analysis_summary: 'e2e',
     };
 
     /** a broker that is "connected" with no open positions, and a parked swing decision */
-    function parkDecision(id: string) {
+    function parkDecision(id: string, trace?: unknown) {
         const a = automate();
         patch(a, 'ctraderService', {
             isAuthorized: true,
             getPositions: () => Promise.resolve({ position: [], order: [] }),
             cancelOrder: () => Promise.resolve(),
         });
-        a.pending.set(a.sk('swing'), { id, decision: DECISION, sizeCap: null, createdAt: Date.now() });
+        a.pending.set(a.sk('swing'), { id, decision: DECISION, sizeCap: null, createdAt: Date.now(), trace });
         restores.push(() => a.pending.clear());
     }
     const orderCount = (uuidPrefix: string): Promise<number> =>
@@ -201,6 +202,64 @@ describe('confirm a parked decision', () => {
         assert.equal(ev?.success, true);
     });
 });
+
+describe('order context (backtest record)', () => {
+    before(async () => {
+        await t.resetData();
+    });
+
+    it('a fired order stores the configuration, guards and sizing it was placed under', async () => {
+        const a = automate();
+        patch(a, 'ctraderService', {
+            isAuthorized: true,
+            getPositions: () => Promise.resolve({ position: [], order: [] }),
+            cancelOrder: () => Promise.resolve(),
+        });
+        const { newTrace } = createRequire(import.meta.url)(
+            join(import.meta.dirname, '../../dist/gold/records/round-context.js'),
+        );
+        const trace = newTrace(a.configSnapshot(a.profile, 'swing', 1.8));
+        trace.guards.daily_pnl_usd = -12.5;
+        a.pending.set(a.sk('swing'), {
+            id: 'ctx00001',
+            decision: { ...CONTEXT_DECISION },
+            sizeCap: null,
+            createdAt: Date.now(),
+            trace,
+        });
+        restores.push(() => a.pending.clear());
+        const op = await operator();
+        const res = await op.agent
+            .post('/api/dashboard/confirm')
+            .set('x-csrf-token', op.csrf)
+            .send({ mode: 'swing', id: 'ctx00001' })
+            .expect(201);
+        const order = await t.collection('orders').findOne({ uuid: res.body.uuid });
+        assert.equal(order?.configHash, trace.config_hash);
+        assert.equal(order?.riskProfile, 'custom');
+        assert.equal(order?.context.config.mode.name, 'swing');
+        assert.equal(order?.context.guards.daily_pnl_usd, -12.5);
+        assert.equal(order?.context.sizing.method, 'risk');
+        assert.equal(order?.context.sizing.lots, order?.volume);
+        assert.doesNotMatch(JSON.stringify(order?.context), /API_KEY|ACCESS_TOKEN|APP_SECRET/);
+    });
+});
+
+const CONTEXT_DECISION = {
+    order_type: 'BUY_LIMIT',
+    entry: 4001.5,
+    sl: 3995,
+    tp1: 4015,
+    tp2: null,
+    rr_tp1: 2,
+    confidence: 7,
+    size: 'quarter',
+    playbook_ref: 'swing #1',
+    invalidation: '',
+    valid_until_utc: null,
+    reason: 'e2e',
+    analysis_summary: 'e2e',
+};
 
 describe('archive', () => {
     before(async () => {

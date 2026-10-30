@@ -28,7 +28,7 @@ export class StrategyController {
 
     async run(symbol, period = 'M5', maxPositions = 1) {
         // Clear line before printing new status
-        tradeLog.status(`\r\u001b[2K[คิด] กำลังวิเคราะห์กลยุทธ์ ${this.mode} สำหรับ ${symbol} (${period})...`);
+        tradeLog.status(`\r\u001b[2K[Think] Analyzing strategy ${this.mode} for ${symbol} (${period})...`);
 
         // New: Guard against existing positions (Skip for Sonic as Backend handles it)
         if (this.mode !== 'Sonic') {
@@ -38,15 +38,15 @@ export class StrategyController {
                 });
                 const activePosition = positions.find((p) => p.symbolName === symbol);
                 if (activePosition) {
-                    tradeLog.status(`\n[รอ] มี Position ${symbol} เปิดค้างไว้แล้ว ข้ามการวิเคราะห์รอบนี้...\n`);
+                    tradeLog.status(`\n[Wait] A ${symbol} position is already open, skipping analysis this cycle...\n`);
                     return;
                 }
             } catch (e) {
                 if (e.status === 503) {
-                    tradeLog.status(`\n[รอ] บริการยังไม่พร้อม (cTrader Auth)...`);
+                    tradeLog.status(`\n[Wait] Service not ready yet (cTrader Auth)...`);
                     return;
                 }
-                tradeLog.error(`\n[รอ] Positions Check Failed: ${e.message} (Code: ${e.code})`);
+                tradeLog.error(`\n[Wait] Positions Check Failed: ${e.message} (Code: ${e.code})`);
                 // If it's a timeout or connection error, we might want to return early or proceed with caution
                 if (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED') return;
             }
@@ -56,7 +56,7 @@ export class StrategyController {
         if (this.mode !== 'Swing' && this.mode !== 'Sonic') {
             const isNewsRestricted = await this.newsService.checkNewsFilter();
             if (isNewsRestricted) {
-                tradeLog.info('\n[รอ] Strategy: News restriction active. Skipping trade check.');
+                tradeLog.info('\n[Wait] Strategy: News restriction active. Skipping trade check.');
                 if (this.mode === 'Hardcode' || this.mode === 'Merge') {
                     return;
                 }
@@ -84,15 +84,15 @@ export class StrategyController {
                 await this.runScalper(symbol, maxPositions);
                 break;
             default:
-                tradeLog.info(`\n[รอ] โหมดที่ไม่รู้จัก: ${this.mode}`);
+                tradeLog.info(`\n[Wait] Unknown mode: ${this.mode}`);
         }
-        tradeLog.status(`\n[รอ] เสร็จสิ้นรอบการทำงาน กำลังรอรอบถัดไป...\n`);
+        tradeLog.status(`\n[Wait] Cycle complete, waiting for the next cycle...\n`);
     }
 
     async runMerge(symbol, entryPeriod = 'M5') {
         const trendPeriod = 'M15';
         tradeLog.status(
-            `\n[คิด] วิเคราะห์โหมด Merge: มองใหญ่ (${trendPeriod}, EMA200) ยิงเล็ก (${entryPeriod}, RSI+BB)...`,
+            `\n[Think] Analyzing Merge mode: big picture (${trendPeriod}, EMA200), entry on small (${entryPeriod}, RSI+BB)...`,
         );
 
         // 1. Fetch M15 for Trend (EMA 200)
@@ -105,7 +105,7 @@ export class StrategyController {
 
         const pricesM15 = klinesM15.map((k) => parseFloat(k.close));
         if (pricesM15.length < 200) {
-            tradeLog.status(`\n[รอ] ข้อมูล M15 ไม่เพียงพอสำหรับ EMA200 (มีแค่ ${pricesM15.length})...`);
+            tradeLog.status(`\n[Wait] Not enough M15 data for EMA200 (only ${pricesM15.length})...`);
             return;
         }
 
@@ -133,7 +133,7 @@ export class StrategyController {
         const lastRSI = rsi[rsi.length - 1];
         const lastBB = bb[bb.length - 1];
         const lastPriceM5 = pricesM5[pricesM5.length - 1];
-        const lastBarTime = new Date(klinesM5[klinesM5.length - 1].timestamp).toLocaleTimeString('th-TH');
+        const lastBarTime = new Date(klinesM5[klinesM5.length - 1].timestamp).toLocaleTimeString('en-GB');
 
         tradeLog.info(
             `      - [M5 Setup]: RSI=${lastRSI.toFixed(2)}, Price=${lastPriceM5.toFixed(2)}, Time=${lastBarTime}`,
@@ -142,7 +142,9 @@ export class StrategyController {
 
         // 3. Entry Logic Integration (Merge uses LIMIT at BB edge)
         if (trend === 'UP' && lastRSI < 30 && lastPriceM5 <= lastBB.lower) {
-            tradeLog.info('\n[ทำ] เงื่อนไขครบ: เทรนด์ขึ้น + RSI Oversold + แตะ BB Lower. วางวกับดัก BUY LIMIT!');
+            tradeLog.info(
+                '\n[Exec] Conditions met: uptrend + RSI Oversold + touched BB Lower. Setting a BUY LIMIT trap!',
+            );
             const volume = await this.tradeDispatcher.calculateLotSize();
             await this.tradeDispatcher.executeTrade({
                 symbol,
@@ -155,7 +157,9 @@ export class StrategyController {
                 comment: 'Merge Strategy BUY LIMIT',
             });
         } else if (trend === 'DOWN' && lastRSI > 70 && lastPriceM5 >= lastBB.upper) {
-            tradeLog.info('\n[ทำ] เงื่อนไขครบ: เทรนด์ลง + RSI Overbought + แตะ BB Upper. วางกับดัก SELL LIMIT!');
+            tradeLog.info(
+                '\n[Exec] Conditions met: downtrend + RSI Overbought + touched BB Upper. Setting a SELL LIMIT trap!',
+            );
             const volume = await this.tradeDispatcher.calculateLotSize();
             await this.tradeDispatcher.executeTrade({
                 symbol,
@@ -168,7 +172,7 @@ export class StrategyController {
                 comment: 'Merge Strategy SELL LIMIT',
             });
         } else {
-            tradeLog.status(`\r[รอ] วิเคราะห์เสร็จสิ้น: ยังไม่ครบเงื่อนไข 3 ชั้น... `);
+            tradeLog.status(`\r[Wait] Analysis complete: 3-layer conditions not met yet... `);
         }
     }
 
@@ -183,7 +187,7 @@ export class StrategyController {
         try {
             klinesM1 = await this.klinesService.getKlines(symbol, entryPeriod, 100, maxPositions); // Need enough bars for EMA 25
         } catch (e) {
-            tradeLog.error(`\n[รอ] GetKlines (M1) Failed: ${e.message}`);
+            tradeLog.error(`\n[Wait] GetKlines (M1) Failed: ${e.message}`);
             return;
         }
 
@@ -194,8 +198,8 @@ export class StrategyController {
         const lastRSI = rsi[rsi.length - 1];
         const lastEMA20 = ema20List[ema20List.length - 1];
         const lastPrice = pricesM1[pricesM1.length - 1];
-        const lastBarTime = new Date(klinesM1[klinesM1.length - 1].timestamp).toLocaleTimeString('th-TH');
-        const nowTime = new Date().toLocaleTimeString('th-TH');
+        const lastBarTime = new Date(klinesM1[klinesM1.length - 1].timestamp).toLocaleTimeString('en-GB');
+        const nowTime = new Date().toLocaleTimeString('en-GB');
 
         tradeLog.info(`\n      - [Run Time]: ${nowTime}`);
         tradeLog.info(
@@ -208,7 +212,7 @@ export class StrategyController {
             ...
         }
         */
-        tradeLog.status(`\r[รอ] Sonic: ยังไม่ครบเงื่อนไข Balanced (Backend handles execution)... `);
+        tradeLog.status(`\r[Wait] Sonic: Balanced conditions not met yet (Backend handles execution)... `);
     }
 
     async runScalper(symbol, maxPositions = 1) {
@@ -219,9 +223,9 @@ export class StrategyController {
                 query: { symbol, maxPositions },
                 timeoutMs: 5000,
             });
-            tradeLog.status(`\r[ทํา] Scalper: ลอจิกถูกเช็คจากฝั่ง Backend (API Service)... `);
+            tradeLog.status(`\rScalper: logic is checked on the Backend side (API Service)... `);
         } catch (e) {
-            tradeLog.status(`\r[รอ] Scalper: Backend Ping Failed: ${e.message} `);
+            tradeLog.status(`\r[Wait] Scalper: Backend Ping Failed: ${e.message} `);
         }
     }
 
@@ -232,7 +236,7 @@ export class StrategyController {
        (caught and logged by the loop) and has never placed an order. Computing it would make
        Hardcode mode start trading, which is a decision for the strategy owner, not a refactor. */
     async runHardcodeFlow(symbol, period) {
-        tradeLog.status(`\r[ทำ] กำลังดึงข้อมูล Klines...`);
+        tradeLog.status(`\r[Exec] Fetching Klines data...`);
         const klines = await this.klinesService.getKlines(symbol, period);
         const prices = klines.map((k) => parseFloat(k.close));
 
@@ -274,7 +278,7 @@ export class StrategyController {
     /* eslint-enable no-undef, no-unused-vars */
 
     async runConservativeFlow(symbol, period) {
-        tradeLog.status(`\r[ทำ] กำลังดึงข้อมูล Klines...`);
+        tradeLog.status(`\r[Exec] Fetching Klines data...`);
         const klines = await this.klinesService.getKlines(symbol, period);
         const prices = klines.map((k) => parseFloat(k.close));
 
@@ -322,7 +326,7 @@ export class StrategyController {
     }
 
     async runSwingFlow(symbol, period) {
-        tradeLog.status(`\r[ทำ] กำลังดึงข้อมูล Klines...`);
+        tradeLog.status(`\r[Exec] Fetching Klines data...`);
         const klines = await this.klinesService.getKlines(symbol, period);
         const prices = klines.map((k) => parseFloat(k.close));
 
@@ -332,14 +336,14 @@ export class StrategyController {
         const lastRSI = rsi[rsi.length - 1];
         const lastBB = bb[bb.length - 1];
         const lastPrice = prices[prices.length - 1];
-        const lastBarTime = new Date(klines[klines.length - 1].timestamp).toLocaleTimeString('th-TH');
+        const lastBarTime = new Date(klines[klines.length - 1].timestamp).toLocaleTimeString('en-GB');
 
-        tradeLog.info(`\n      - ราคาปัจจุบัน: ${lastPrice.toFixed(2)} (Time: ${lastBarTime})`);
-        tradeLog.info(`      - RSI: ${lastRSI.toFixed(2)} (ต้องการ < 30 หรือ > 70)`);
+        tradeLog.info(`\n      - Current price: ${lastPrice.toFixed(2)} (Time: ${lastBarTime})`);
+        tradeLog.info(`      - RSI: ${lastRSI.toFixed(2)} (need < 30 or > 70)`);
         tradeLog.info(`      - Bollinger Bands: Low=${lastBB.lower.toFixed(2)}, High=${lastBB.upper.toFixed(2)}`);
 
         if (lastRSI < 30 && lastPrice <= lastBB.lower) {
-            tradeLog.info('\n[ทำ] เงื่อนไขครบ: RSI Oversold + ราคาแตะ BB Lower. วางกับดัก BUY LIMIT!');
+            tradeLog.info('\n[Exec] Conditions met: RSI Oversold + price touched BB Lower. Setting a BUY LIMIT trap!');
             const volume = await this.tradeDispatcher.calculateLotSize();
             await this.tradeDispatcher.executeTrade({
                 symbol,
@@ -352,7 +356,9 @@ export class StrategyController {
                 comment: 'Swing-BUY-LIMIT',
             });
         } else if (lastRSI > 70 && lastPrice >= lastBB.upper) {
-            tradeLog.info('\n[ทำ] เงื่อนไขครบ: RSI Overbought + ราคาแตะ BB Upper. วางกับดัก SELL LIMIT!');
+            tradeLog.info(
+                '\n[Exec] Conditions met: RSI Overbought + price touched BB Upper. Setting a SELL LIMIT trap!',
+            );
             const volume = await this.tradeDispatcher.calculateLotSize();
             await this.tradeDispatcher.executeTrade({
                 symbol,
@@ -365,7 +371,7 @@ export class StrategyController {
                 comment: 'Swing-SELL-LIMIT',
             });
         } else {
-            tradeLog.status(`\r[รอ] ยังไม่มีสัญญาณเข้าเทรด... `);
+            tradeLog.status(`\r[Wait] No entry signal yet... `);
         }
     }
 }

@@ -5,6 +5,7 @@ import * as protobuf from 'protobufjs';
 import * as path from 'path';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { errorMessage, errorStack } from '../common/utils/errors';
+import { HISTORY_MIN_INTERVAL_MS, HISTORY_REQUESTS, RequestLimiter, retryOnRateLimit } from './history-limiter';
 
 const HEARTBEAT_MS = 10_000; // ต้องต่ำกว่า idle timeout ~30s ของ cTrader ให้มีที่เหลือเฟือ
 
@@ -18,6 +19,9 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
     private isConnected = false;
     private shuttingDown = false;
     private isAccountAuthorized = false;
+    /** spaces out historical-data requests (cTrader allows ~5/s per app) */
+    private readonly historyLimiter = new RequestLimiter(HISTORY_MIN_INTERVAL_MS);
+
     private _activeAccountId!: number;
     private pendingRequests = new Map<
         string,
@@ -84,7 +88,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
             this.spotOwners.clear();
             this.logger.warn('WebSocket Disconnected. Reconnecting...');
             this.stopHeartbeat();
-            this.failPending('WebSocket ตัดการเชื่อมต่อระหว่างรอคำตอบ');
+            this.failPending('WebSocket disconnected while awaiting a response');
             this.scheduleReconnect();
         });
 
@@ -101,7 +105,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
         try {
             this.send('ProtoOAApplicationAuthReq', payload);
         } catch (e) {
-            this.logger.error(`ส่ง app auth ไม่ได้: ${errorMessage(e)}`);
+            this.logger.error(`Failed to send app auth: ${errorMessage(e)}`);
         }
     }
 
@@ -128,7 +132,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
         try {
             this.send('ProtoOAAccountAuthReq', payload);
         } catch (e) {
-            this.logger.error(`ส่ง account auth ไม่ได้: ${errorMessage(e)}`);
+            this.logger.error(`Failed to send account auth: ${errorMessage(e)}`);
         }
     }
 
@@ -178,8 +182,16 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
                             const decoded = type.decode(message.payload);
                             pending.resolve(decoded);
                         } catch (e) {
-                            this.logger.error(`Failed to decode response of type ${typeName}`, errorStack(e));
-                            pending.resolve(message.payload);
+                            // a response missing a field the .proto marks required: protobufjs throws a
+                            // ProtocolError that still carries everything it decoded, which beats raw bytes
+                            const partial = (e as { instance?: unknown } | null)?.instance;
+                            if (e instanceof protobuf.util.ProtocolError && partial) {
+                                this.logger.debug(`${typeName}: ${errorMessage(e)} — using the fields decoded so far`);
+                                pending.resolve(partial);
+                            } else {
+                                this.logger.error(`Failed to decode response of type ${typeName}`, errorStack(e));
+                                pending.resolve(message.payload);
+                            }
                         }
                     } else {
                         pending.resolve(message.payload);
@@ -286,7 +298,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
         const set = this.spotOwners.get(symbolId);
         set?.delete(owner);
         if (!force && set && set.size > 0) {
-            this.logger.log(`ข้าม unsubscribe ${symbolId} — ยังมีผู้ใช้งาน: ${[...set].join(', ')}`);
+            this.logger.log(`Skipping unsubscribe ${symbolId} — still in use by: ${[...set].join(', ')}`);
             return null;
         }
         this.spotOwners.delete(symbolId);
@@ -365,7 +377,23 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
+    /**
+     * Sends a request and waits for its answer. Historical-data requests (deal lists, trendbars) are
+     * spaced by a shared limiter and retried with backoff if cTrader still answers "rate limited",
+     * so callers never see a rate-limit error unless it persists.
+     */
     public async request<T>(payloadTypeName: string, payload: any, timeoutMs: number = 10000): Promise<T> {
+        if (!HISTORY_REQUESTS.has(payloadTypeName)) return this.sendAndWait<T>(payloadTypeName, payload, timeoutMs);
+        return retryOnRateLimit(
+            () => this.historyLimiter.schedule(() => this.sendAndWait<T>(payloadTypeName, payload, timeoutMs)),
+            {
+                onRetry: (attempt, delay) =>
+                    this.logger.warn(`${payloadTypeName} rate limited — retry ${attempt} in ${delay} ms`),
+            },
+        );
+    }
+
+    private sendAndWait<T>(payloadTypeName: string, payload: any, timeoutMs: number): Promise<T> {
         return new Promise((resolve, reject) => {
             const clientMsgId = `req_${++this.clientMsgIdCounter}`;
             const timeout = setTimeout(() => {
@@ -389,7 +417,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
             // เดิม log แล้ว return เฉย ๆ = คำขอหายไปเงียบ ๆ ผู้เรียกรอจนหมดเวลาแล้วนึกว่า
             // "server ช้า" ทั้งที่จริงคือไม่ได้ส่งออกไปเลย (26 ส.ค.: 93 ครั้งใน 1 วัน)
             // โยน error ให้ request() reject ทันที จะได้เห็นสาเหตุจริง
-            throw new Error('cTrader ไม่ได้เชื่อมต่ออยู่ — ส่งคำขอไม่ได้');
+            throw new Error('cTrader is not connected — cannot send request');
         }
 
         try {
@@ -487,7 +515,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
     /** ตัดจบคำขอที่ค้างอยู่ทั้งหมด — ดีกว่าปล่อยให้ผู้เรียกรอจนครบ timeout แล้วเข้าใจผิดว่า server ช้า */
     private failPending(reason: string) {
         if (!this.pendingRequests.size) return;
-        this.logger.warn(`ยกเลิกคำขอที่ค้างอยู่ ${this.pendingRequests.size} รายการ: ${reason}`);
+        this.logger.warn(`Cancelling ${this.pendingRequests.size} pending request(s): ${reason}`);
         for (const [, p] of this.pendingRequests) {
             clearTimeout(p.timeout);
             p.reject(new Error(reason));

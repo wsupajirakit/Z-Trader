@@ -8,15 +8,15 @@ import {
   redirect,
   type RouterHistory,
 } from '@tanstack/react-router';
-import { ChangePasswordPage } from '../features/auth/ChangePasswordPage';
-import { LoginPage } from '../features/auth/LoginPage';
 import {
   validateArchiveFileSearch,
   validateArchiveSearch,
-} from '../features/dashboard/archive/archiveSearch';
-import { DashboardPage } from '../features/dashboard/DashboardPage';
+} from '../features/archive/archiveSearch';
+import { ChangePasswordPage } from '../features/auth/ChangePasswordPage';
+import { LoginPage } from '../features/auth/LoginPage';
 import { safeRedirectPath } from '../lib/safeUrl';
-import { AppLayout } from './AppLayout';
+import { TerminalPage } from '../pages/TerminalPage';
+import { TerminalShell } from '../shell/TerminalShell';
 import {
   guardApp,
   guardGuest,
@@ -27,18 +27,16 @@ import {
 import { NotFound, RouteError } from './RouteFallbacks';
 
 /*
- * Code-based route tree (no generated file): small, explicit, and every guard is visible here.
+ * Code-based route tree:
  *
  *   /login                   guest only
  *   /change-password         any session (forced when mustChangePassword)
- *   (app)                    signed in, password already changed      → AppLayout
- *     /                      dashboard
- *     /archive               archive list
- *     /archive/$mode/$file   archive viewer
- *     /account               my sessions + change password
- *     /admin                 admin only
- *       /admin/users
- *       /admin/audit
+ *   (app)                    signed in, password changed      → TerminalShell
+ *     /                      terminal (Launchpad workspaces)
+ *     /chart /bot /strategy /trades /news /settings
+ *     /archive, /archive/$mode/$file
+ *     /account
+ *     /admin/users, /admin/audit   admin only
  */
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -69,13 +67,63 @@ const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'app',
   beforeLoad: guardApp,
-  component: AppLayout,
+  component: TerminalShell,
 });
 
-const dashboardRoute = createRoute({
+const terminalRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/',
-  component: DashboardPage,
+  component: TerminalPage,
+});
+const chartRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'chart',
+  component: lazyRouteComponent(
+    () => import('../pages/ChartPage'),
+    'ChartPage',
+  ),
+});
+const botRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'bot',
+  component: lazyRouteComponent(() => import('../pages/BotPage'), 'BotPage'),
+});
+const strategyRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'strategy',
+  component: lazyRouteComponent(
+    () => import('../pages/StrategyPage'),
+    'StrategyPage',
+  ),
+});
+const tradesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'trades',
+  component: lazyRouteComponent(
+    () => import('../pages/TradesPage'),
+    'TradesPage',
+  ),
+});
+const newsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'news',
+  component: lazyRouteComponent(() => import('../pages/NewsPage'), 'NewsPage'),
+});
+const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'settings',
+  component: lazyRouteComponent(
+    () => import('../pages/SettingsPage'),
+    'SettingsPage',
+  ),
+});
+const accountRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: 'account',
+  component: lazyRouteComponent(
+    () => import('../features/account/AccountPage'),
+    'AccountPage',
+  ),
 });
 
 const archiveRoute = createRoute({
@@ -83,7 +131,7 @@ const archiveRoute = createRoute({
   path: 'archive',
   validateSearch: validateArchiveSearch,
   component: lazyRouteComponent(
-    () => import('../features/dashboard/archive/ArchiveListPage'),
+    () => import('../features/archive/ArchiveListPage'),
     'ArchiveListPage',
   ),
 });
@@ -93,17 +141,8 @@ const archiveFileRoute = createRoute({
   path: 'archive/$mode/$file',
   validateSearch: validateArchiveFileSearch,
   component: lazyRouteComponent(
-    () => import('../features/dashboard/archive/ArchiveFilePage'),
+    () => import('../features/archive/ArchiveFilePage'),
     'ArchiveFilePage',
-  ),
-});
-
-const accountRoute = createRoute({
-  getParentRoute: () => appRoute,
-  path: 'account',
-  component: lazyRouteComponent(
-    () => import('../features/account/AccountPage'),
-    'AccountPage',
   ),
 });
 
@@ -125,7 +164,7 @@ const usersRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: 'users',
   component: lazyRouteComponent(
-    () => import('../features/users/UsersPage'),
+    () => import('../features/admin/UsersPage'),
     'UsersPage',
   ),
 });
@@ -134,7 +173,7 @@ const auditRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: 'audit',
   component: lazyRouteComponent(
-    () => import('../features/audit/AuditPage'),
+    () => import('../features/admin/AuditPage'),
     'AuditPage',
   ),
 });
@@ -143,10 +182,16 @@ export const routeTree = rootRoute.addChildren([
   loginRoute,
   changePasswordRoute,
   appRoute.addChildren([
-    dashboardRoute,
+    terminalRoute,
+    chartRoute,
+    botRoute,
+    strategyRoute,
+    tradesRoute,
+    newsRoute,
+    settingsRoute,
+    accountRoute,
     archiveRoute,
     archiveFileRoute,
-    accountRoute,
     adminRoute.addChildren([adminIndexRoute, usersRoute, auditRoute]),
   ]),
 ]);
@@ -160,7 +205,6 @@ export function createAppRouter(options: {
     context: { queryClient: options.queryClient },
     ...(options.history ? { history: options.history } : {}),
     defaultPreload: 'intent',
-    // Route data comes from TanStack Query, which has its own cache.
     defaultPreloadStaleTime: 0,
     scrollRestoration: true,
   });

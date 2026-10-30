@@ -5,7 +5,7 @@ Two audiences, two auth schemes. They never mix.
 | Audience | Prefix | Auth |
 |---|---|---|
 | Browser dashboard (`web/`) | `/api/auth`, `/api/users`, `/api/audit`, `/api/dashboard` | session cookie + `X-CSRF-Token` on writes |
-| Machines (zTraderActor, the `/gold-run` skill, curl) | `/gold`, `/orders`, `/history`, `/api/v1/klines`, `/api/v1/auth/verify`, socket.io `/klines` | `x-api-key: $API_KEY` |
+| Machines (zTraderActor, review scripts, curl) | `/gold`, `/orders`, `/history`, `/api/v1/klines`, `/api/v1/auth/verify`, socket.io `/klines` | `x-api-key: $API_KEY` |
 | Probes | `/health` | none |
 
 Errors use the NestJS shape: `{ "statusCode": 400, "message": "…" | ["…"], "error": "Bad Request" }`.
@@ -83,7 +83,7 @@ interface AuditEvent {
 }
 ```
 
-Password rule: 12–128 characters and must not contain the username.
+Password rule: 9–128 characters and must not contain the username.
 
 ### `/api/auth`
 
@@ -139,9 +139,10 @@ These are the same handlers that used to live under `/ui/api/*`. Only the prefix
 | GET | `/api/dashboard/archive/:mode/:file?full=1` | viewer | |
 | GET | `/api/dashboard/positions` | viewer | |
 | GET | `/api/dashboard/history?days=` | viewer | 1–365 |
-| GET | `/api/dashboard/ai/models` | viewer | |
+| GET | `/api/dashboard/ai/models` | viewer | Gemini + Claude models with the AI modes each can serve |
+| GET | `/api/dashboard/account` | viewer | `{ available, accountId, mode, balance, currency, leverage }` |
 | POST | `/api/dashboard/instrument` | operator | `{ symbol }` |
-| POST | `/api/dashboard/settings` | operator | partial settings |
+| POST | `/api/dashboard/settings` | operator | partial settings (risk limits, `ai_mode` off/assist/lead/ai_only, `ai_model`, `ai_thinking`, `ai_strictness` normal/strict/very_strict/maximum, `ai_gate`) |
 | POST | `/api/dashboard/daily-stop/reset` | operator | |
 | POST | `/api/dashboard/ai/reset-calls` | operator | |
 | POST | `/api/dashboard/automate` | operator | `{ enabled, modes?, instruments? }` |
@@ -152,11 +153,53 @@ These are the same handlers that used to live under `/ui/api/*`. Only the prefix
 
 Every operator action is written to the audit log.
 
+`ai_strictness` only tightens: above `normal` an AI confidence below 6/7/8 vetoes the trade, the prompt asks for
+stricter setups and Gemini's temperature is capped. Claude models (`claude-*`) serve the `ai_only` mode only.
+
+### `/api/risk-profiles`
+
+Built-in profiles (`builtin:conservative`, `builtin:balanced`, `builtin:aggressive`, `builtin:micro`) plus profiles
+saved in MongoDB. Risk per trade and the daily stop can be USD or a % of the account balance. Applying a profile goes
+through the same all-or-nothing settings path as `POST /api/dashboard/settings` and is persisted with the other
+overrides; `GET /api/dashboard/settings` then reports `risk_profile: { id, name, modified, changed }`.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/risk-profiles` | viewer | `{ balance, active, profiles: [{ id, name, builtIn, values, resolved }] }` |
+| POST | `/api/risk-profiles` | operator | `{ name, description?, values }` |
+| PATCH | `/api/risk-profiles/:id` | operator | saved profiles only |
+| DELETE | `/api/risk-profiles/:id` | admin | saved profiles only |
+| POST | `/api/risk-profiles/:id/apply` | operator | resolves % against the live balance |
+
+### `/api/chart` — candles for the terminal chart
+
+Sources: `ctrader` (the account broker) and `tv:<EXCHANGE>` (TradingView). XAUUSD: OANDA, PEPPERSTONE, CAPITALCOM,
+VANTAGE, ICMARKETS, EIGHTCAP, FOREXCOM, BLACKBULL. FX pairs: OANDA, FX_IDC, FOREXCOM, PEPPERSTONE, ICMARKETS,
+CAPITALCOM, SAXO. The chart source never changes what the bot analyses (always the cTrader feed).
+Optional env: `TV_AUTH_TOKEN` or `TV_USERNAME` / `TV_PASSWORD` (anonymous access is rate-limited harder).
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/chart/sources?symbol=` | viewer | `{ symbol, sources: [{ id, label, kind }] }` |
+| GET | `/api/chart/bars?symbol&source&tf&limit` | viewer | tf M1…D1, limit 50–2000; `{ bars: [{ time, open, high, low, close, volume }] }` |
+| GET | `/api/chart/stream?symbol&source&tf` | viewer | Server-Sent Events: `bar`, `status` (`live`/`reconnecting`/`error`) |
+
+### `/api/actor` — the legacy strategy loop (zTraderActor)
+
+Needs `ACTOR_URL`; the service calls the Actor's API-key machine routes on behalf of the signed-in user.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| GET | `/api/actor/state` | viewer | `{ available, isRunning, symbols, mode, modes, symbolsLive }` or `{ available: false, reason }` |
+| GET | `/api/actor/logs?after&limit` | viewer | `{ latestId, entries }` |
+| POST | `/api/actor/start` | operator | `{ symbols, mode }`, audited |
+| POST | `/api/actor/stop` | operator | audited |
+
 ---
 
 ## Machine API (`x-api-key`)
 
-The paths are unchanged, because zTraderActor and the `/gold-run` skill call them. `API_KEY` is trimmed of
+The paths are unchanged, because zTraderActor and external scripts call them. `API_KEY` is trimmed of
 surrounding whitespace and must then be at least 32 characters. The key is compared in constant time.
 
 - `/gold/*`, `POST /orders`, `GET /history`, `GET /history/stat`, `/api/v1/klines/*`

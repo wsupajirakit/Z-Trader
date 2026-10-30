@@ -1,24 +1,18 @@
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import TextField from '@mui/material/TextField';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getRouteApi, useNavigate } from '@tanstack/react-router';
-import { useState, type SubmitEvent } from 'react';
-import { ApiError, describeError } from '../../api/client';
+import { useState } from 'react';
 import { authApi } from '../../api/auth';
 import { qk } from '../../api/queryKeys';
+import { AuthScreen } from './AuthScreen';
+import { loginError } from './loginError';
 import { normalizeUsername } from './password';
 import { adoptSession } from './session';
 
 const route = getRouteApi('/login');
-
-function loginError(e: unknown): string {
-  if (e instanceof ApiError) {
-    if (e.status === 429) {
-      const min = e.retryAfterSec ? Math.ceil(e.retryAfterSec / 60) : 15;
-      return `ใส่รหัสผิดหลายครั้งเกินไป — ลองใหม่ในอีก ${min} นาที`;
-    }
-    if (e.status === 401) return 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
-  }
-  return describeError(e) || 'เข้าสู่ระบบไม่สำเร็จ';
-}
 
 export function LoginPage() {
   const { redirect } = route.useSearch();
@@ -26,7 +20,6 @@ export function LoginPage() {
   const qc = useQueryClient();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-
   const login = useMutation({
     mutationFn: authApi.login,
     onSuccess: async (session) => {
@@ -38,53 +31,66 @@ export function LoginPage() {
     },
   });
 
-  const submit = (e: SubmitEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!username.trim() || !password) return;
-    login.mutate({ username: normalizeUsername(username), password });
-  };
-
   return (
-    <div className="auth-screen">
-      <form
-        className="auth-box"
-        onSubmit={submit}
+    <AuthScreen title="Trading terminal · sign in">
+      <Box
+        component="form"
         aria-labelledby="login-title"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!username.trim() || !password) return;
+          login.mutate({ username: normalizeUsername(username), password });
+        }}
+        sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}
       >
-        <h2 id="login-title">🔒 zTrader Dashboard</h2>
-        <input
+        <Box component="h1" id="login-title" sx={{ m: 0, fontSize: 20 }}>
+          Sign in
+        </Box>
+        <TextField
+          label="Username"
           name="username"
           autoComplete="username"
-          placeholder="ชื่อผู้ใช้"
-          aria-label="ชื่อผู้ใช้"
-          autoCapitalize="none"
-          spellCheck={false}
           autoFocus
+          fullWidth
+          slotProps={{
+            input: { sx: { fontSize: 16, '& input': { py: 2.5 } } },
+            htmlInput: { autoCapitalize: 'none', spellCheck: false },
+          }}
           value={username}
           onChange={(e) => {
             setUsername(e.target.value);
           }}
         />
-        <input
+        <TextField
+          label="Password"
           type="password"
           name="password"
           autoComplete="current-password"
-          placeholder="รหัสผ่าน"
-          aria-label="รหัสผ่าน"
+          fullWidth
+          slotProps={{
+            input: { sx: { fontSize: 16, '& input': { py: 2.5 } } },
+          }}
           value={password}
           onChange={(e) => {
             setPassword(e.target.value);
           }}
         />
-        <div className="row">
-          <button type="submit" className="btn-run" disabled={login.isPending}>
-            เข้าสู่ระบบ
-          </button>
-        </div>
-        <div className="form-msg error" role="alert">
-          {login.isError ? '❌ ' + loginError(login.error) : null}
-        </div>
-      </form>
-    </div>
+        {login.isError ? (
+          <Alert severity="error" variant="outlined" role="alert">
+            {loginError(login.error)}
+          </Alert>
+        ) : null}
+        <Button
+          type="submit"
+          variant="contained"
+          size="large"
+          fullWidth
+          sx={{ py: 2, fontSize: 14 }}
+          disabled={login.isPending || !username.trim() || !password}
+        >
+          {login.isPending ? 'Signing in…' : 'Sign in'}
+        </Button>
+      </Box>
+    </AuthScreen>
   );
 }

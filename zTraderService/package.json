@@ -1,7 +1,7 @@
 {
   "name": "ztrader-service",
   "version": "1.0.0",
-  "description": "zTrader — cTrader gold/FX trading service with a multi-user dashboard",
+  "description": "zTrader \u2014 cTrader gold/FX trading service with a multi-user dashboard",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
@@ -20,14 +20,17 @@
     "pretest": "npm run build:api",
     "test": "npm run test:e2e && npm run test:instruments && npm run test:web",
     "test:e2e": "node --test --test-concurrency=1 \"test/e2e/**/*.test.mts\"",
-    "test:instruments": "node test/gold-ai-assist.test.js && node test/gemini-shape.test.js && node test/instrument-fx.test.js && node test/ai-lead.test.js && node test/security.test.js && node test/multi-instrument.test.js && node test/gold-guards.test.js",
+    "test:instruments": "node test/gold-ai-assist.test.js && node test/gemini-shape.test.js && node test/instrument-fx.test.js && node test/ai-lead.test.js && node test/security.test.js && node test/multi-instrument.test.js && node test/gold-guards.test.js && npm run test:tv && npm run test:ratelimit && npm run test:records",
     "test:regression": "node test/instrument-regression.test.js",
     "test:security": "node test/security.test.js",
     "baseline": "bash scripts/make-baseline.sh",
     "backtest:export": "node scripts/backtest-export.js",
     "backtest:run": "node scripts/backtest-run.js",
     "test:web": "npm --prefix web test",
-    "test:all": "npm test && npm run test:regression"
+    "test:all": "npm test && npm run test:regression",
+    "test:tv": "node --test test/tv-protocol.test.js",
+    "test:ratelimit": "node --test test/history-limiter.test.js test/deal-cache.test.js",
+    "test:records": "node --test test/round-context.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

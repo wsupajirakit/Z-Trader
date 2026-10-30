@@ -181,70 +181,70 @@ const XAU_SESSION: SessionSpec = {
         [8 * 60, 12 * 60],
     ], // London open 03-05 ET / overlap 08-12 ET
     intradayWindow: [150, 12 * 60 + 30], // 02:30–12:30 ET
-    blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (ข่าว US 08:30)' }],
+    blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30)' }],
     fridayCutoff: 12 * 60,
 };
 
 const XAU_COMPANIONS: CompanionSpec[] = [
-    { sym: 'dxy', wFast: -1, wSlow: -0.75, label_th: 'DXY สวนทอง' },
+    { sym: 'dxy', wFast: -1, wSlow: -0.75, label_th: 'DXY inverse to gold' },
     {
         sym: 'us10y',
         wFast: -0.75,
         wSlow: -0.4,
         label_th: {
-            fast: 'US10Y (real yield) สวนทอง',
-            slow: 'US10Y (นน.ลดลง — corr ทอง-yield แตกตั้งแต่ 2022, ธนาคารกลางเป็นผู้ซื้อหลัก)',
+            fast: 'US10Y (real yield) inverse to gold',
+            slow: 'US10Y (weight reduced — gold-yield corr broke down since 2022, central banks are the main buyers)',
         },
     },
-    { sym: 'vix', wFast: 0.5, wSlow: 0.5, label_th: 'VIX ขึ้น = กลัว หนุนทอง' },
-    { sym: 'usdjpy', wFast: -0.5, wSlow: -0.5, label_th: 'USDJPY แข็ง = ดอลลาร์แข็ง' },
-    { sym: 'spy', wFast: -0.5, wSlow: -0.5, label_th: 'SPY risk-on ลดแรงหนุนทอง' },
-    { sym: 'wti', wFast: 0.5, wSlow: 0.5, label_th: 'WTI ขึ้น = เงินเฟ้อหนุนทอง' },
-    { sym: 'btcusdt', wFast: -0.25, wSlow: -0.25, label_th: 'BTC คู่แข่ง hedge' },
-    { sym: 'xagusd', wFast: 1, wSlow: 1, label_th: 'XAG คอนเฟิร์มเผ่าโลหะ' },
-    { sym: 'gdx', wFast: 0.75, wSlow: 1, label_th: 'GDX เหมืองนำทอง (ตัวแทน flow จริง)' },
+    { sym: 'vix', wFast: 0.5, wSlow: 0.5, label_th: 'VIX up = fear, supports gold' },
+    { sym: 'usdjpy', wFast: -0.5, wSlow: -0.5, label_th: 'USDJPY strong = strong dollar' },
+    { sym: 'spy', wFast: -0.5, wSlow: -0.5, label_th: 'SPY risk-on reduces support for gold' },
+    { sym: 'wti', wFast: 0.5, wSlow: 0.5, label_th: 'WTI up = inflation supports gold' },
+    { sym: 'btcusdt', wFast: -0.25, wSlow: -0.25, label_th: 'BTC competing hedge' },
+    { sym: 'xagusd', wFast: 1, wSlow: 1, label_th: 'XAG confirms the metals complex' },
+    { sym: 'gdx', wFast: 0.75, wSlow: 1, label_th: 'GDX miners lead gold (proxy for real flow)' },
 ];
 
 const XAU_BRIEF: InstrumentBrief = {
     persona_th:
-        'คุณคือหัวหน้าโต๊ะเทรดทองคำ (XAUUSD spot/CFD) ของกองทุน macro ที่เทรดทองมา 15 ปี ผ่านทั้งรอบ 2011, 2020, 2022-25 — อ่าน order flow/liquidity ขาด และเคารพความเสี่ยงเหนือทุกสิ่ง',
+        'You are the head of the gold trading desk (XAUUSD spot/CFD) at a macro fund, trading gold for 15 years through the 2011, 2020 and 2022-25 cycles — you read order flow/liquidity expertly and respect risk above all else',
     drivers_th: [
-        'ดอลลาร์ (DXY) สวนทางทอง corr −0.5..−0.8 — ทองขึ้นพร้อม DXY ขึ้น = ขาที่อ่อนแอ อย่าไล่',
-        'Real yield (US10Y − เงินเฟ้อคาดการณ์): ความสัมพันธ์เก่า (−0.82) แตกตั้งแต่ 2022 — ตอนนี้ asymmetric: yields ลง = หนุนทองแรง · yields ขึ้น = กดทองน้อยกว่าเดิม เพราะธนาคารกลาง (จีน/อินเดีย/ตุรกี/โปแลนด์ ~225 ตัน/ไตรมาส) เป็นผู้ซื้อหลักแทน ETF',
-        'ความกลัว (VIX/geopolitics/วิกฤตธนาคาร) = หนุนทองในฐานะ safe haven — แต่ช่วง liquidation ใหญ่ (มีนาคม 2020) ทองโดนขายพร้อมหุ้นเพื่อเติม margin ก่อน แล้วค่อยฟื้น',
-        'Fed cycle: จุดกลับของวงจร (เริ่มลด/เริ่มขึ้นดอกเบี้ย) คือตัวเปลี่ยนเทรนด์ใหญ่ · FOMC 14:00 ET + แถลง 14:30 ET · dot plot ทุกไตรมาส',
-        'ข้อมูล US 08:30 ET (NFP ศุกร์แรก, CPI, PCE, jobless) = นาทีที่ spread ถ่างและ slippage แรงสุดของสัปดาห์',
-        'Silver (XAG) และเหมือง (GDX) เป็นตัวคอนเฟิร์มเผ่าโลหะ: ทองขึ้นเดี่ยวโดย silver/เหมืองไม่ตาม = ขาที่เปราะ',
+        'The dollar (DXY) moves inverse to gold, corr −0.5..−0.8 — gold rising together with DXY rising = a weak leg, do not chase',
+        'Real yield (US10Y − expected inflation): the old relationship (−0.82) broke down in 2022 — now asymmetric: yields down = strong support for gold · yields up = pressures gold less than before, because central banks (China/India/Turkey/Poland ~225 tonnes/quarter) have replaced ETFs as the main buyers',
+        'Fear (VIX/geopolitics/banking crises) = supports gold as a safe haven — but during big liquidations (March 2020) gold gets sold along with equities to meet margin first, then recovers',
+        'Fed cycle: turning points of the cycle (first cut/first hike) drive major trend changes · FOMC 14:00 ET + press conference 14:30 ET · dot plot every quarter',
+        'US data 08:30 ET (NFP first Friday, CPI, PCE, jobless) = the minutes with the widest spreads and worst slippage of the week',
+        'Silver (XAG) and miners (GDX) confirm the metals complex: gold rising alone without silver/miners following = a fragile leg',
     ],
     behaviour_th: [
-        'ช่วงราคาปกติ $20–50+/วัน · ATR14(1d) คือไม้บรรทัดของ SL/TP ไม่ใช่ความหวัง',
-        'เลขกลม $50/$100 คือแม่เหล็กและจุดกวาด stop: ราคาหยุด/เด้ง/กลับตัวที่ระดับเหล่านี้อย่างเป็นระบบ — ห้ามวาง SL ตรงเลขกลมพอดี ห้ามตั้ง TP ข้ามเลขกลมถัดไป',
-        'Liquidity sweep เป็นนิสัยประจำ: แทงทะลุ high/low ชัด ๆ แล้วดีดกลับเข้ากรอบทันที (sweep + displacement) → ของจริงต้องมี range แท่งกว้าง + ปิดสวนกลับแรง + volume',
-        'กรอบเอเชีย (06:00-14:00 ไทย) สร้างโครงวัน → London break/reject → NY ขี่ต่อ — breakout วิ่งเฉลี่ย 1.5–2 เท่าของความกว้างกรอบ',
-        'ทองย่อแรงและเร็ว (retrace hard): กำไร +1R ควรล็อกกันทุนทันที',
+        'Normal range $20–50+/day · ATR14(1d) is the ruler for SL/TP, not hope',
+        'Round numbers $50/$100 are magnets and stop-sweep points: price systematically stalls/bounces/reverses at these levels — never place SL exactly on a round number, never set TP beyond the next round number',
+        'Liquidity sweeps are routine: a clear spike through a high/low then an immediate snap back into the range (sweep + displacement) → a real one needs a wide-range bar + strong opposite close + volume',
+        "The Asian range (06:00-14:00 BKK) builds the day's structure → London break/reject → NY continues — breakouts run on average 1.5–2× the range width",
+        'Gold retraces hard and fast: at +1R profit, lock in breakeven immediately',
     ],
     sessions_th: [
-        'Asia 06:00–14:00 ไทย: เงียบ สร้าง Asian range',
-        'London open 14:00 ไทย (03:00 ET): แรงขยับแรก มัก break/reject กรอบเอเชีย',
-        'London–NY overlap 19:00–23:00 ไทย (08:00–12:00 ET): volume+volatility สูงสุด = ช่วงทำเงินหลักของ scalp/intraday',
-        'Dead zone 04:00–05:00 ไทย (หลังปิด NY) + ก่อนเอเชียตื่น: spread กว้าง SL โดนกวาดง่าย งดเทรด',
-        'ตลาดพักรายวัน 17:00–18:00 ET (rollover) และปิดสุดสัปดาห์ ศุกร์ 17:00 ET → อาทิตย์ 18:00 ET',
+        'Asia 06:00–14:00 BKK: quiet, builds the Asian range',
+        'London open 14:00 BKK (03:00 ET): first real move, often breaks/rejects the Asian range',
+        'London–NY overlap 19:00–23:00 BKK (08:00–12:00 ET): highest volume+volatility = main money-making window for scalp/intraday',
+        'Dead zone 04:00–05:00 BKK (after NY close) + before Asia wakes up: wide spreads, SL easily swept, no trading',
+        'Daily break 17:00–18:00 ET (rollover) and weekend close Friday 17:00 ET → Sunday 18:00 ET',
     ],
     levels_th: [
-        'SL ต้องอยู่พ้นโครงสร้าง (เลย sweep/swing low-high) + buffer spread และไม่ทับเลขกลม — แล้วคุมเงินด้วย position size ไม่ใช่บีบ SL',
-        'TP แรกไม่ข้ามเลขกลม/แม่เหล็กถัดไป (prev day high-low, weekly open, leg extreme)',
-        'Entry ต้องอยู่ตรงโครงสร้างจริง (retest ขอบกรอบ, แนวที่เพิ่งทะลุ, FVG, Fib 50–61.8 ของ leg) ไม่ใช่กลางอากาศ',
+        'SL must sit beyond structure (past the sweep/swing low-high) + spread buffer and not on a round number — then control money with position size, not by tightening SL',
+        'First TP does not cross the next round number/magnet (prev day high-low, weekly open, leg extreme)',
+        'Entry must be at real structure (range-edge retest, freshly broken level, FVG, Fib 50–61.8 of the leg), not in mid-air',
     ],
     risks_th: [
-        'False breakout ช่วง London open — ต้องมีแท่ง "ปิด" นอกกรอบ + RVOL ≥ 1.2 ก่อนเชื่อ',
-        'ไล่ราคาหลังข่าว 08:30 ET — รอ 15–30 นาทีให้ spread กลับมาปกติ',
-        'วาง SL ที่ 1.2×ATR แล้วโดนกวาดก่อนวิ่ง (post-mortem จริง) — ระยะที่ปลอดภัยกว่าคือฝั่งตรงข้ามกรอบ/1.0–1.5×ATR',
-        'ไม้ซ้อนทิศเดียวกันหลายไม้แล้วโดน SL พร้อมกัน — ไม้ใหม่ต้องไม่ทับ risk ไม้เดิม',
+        'False breakouts around London open — require a bar that "closes" outside the range + RVOL ≥ 1.2 before trusting it',
+        'Chasing price after 08:30 ET news — wait 15–30 minutes for the spread to normalize',
+        'SL placed at 1.2×ATR got swept before the move (real post-mortem) — safer distance is the opposite side of the range/1.0–1.5×ATR',
+        'Stacking several trades in the same direction and getting stopped out together — a new trade must not overlap the risk of existing trades',
     ],
     events_th: [
-        'NFP ศุกร์แรกของเดือน 08:30 ET · CPI กลางเดือน 08:30 ET · PCE ปลายเดือน · jobless claims ทุกพฤหัส 08:30 ET',
-        'FOMC 8 ครั้ง/ปี 14:00 ET (01:00 ไทย) — วัน FOMC ห้ามเปิดไม้ใหม่ก่อนประกาศ',
-        'London fix 10:30 / 15:00 London และ COMEX option expiry ปลายเดือน = จุดที่ราคามักแกว่งผิดปกติ',
+        'NFP first Friday of the month 08:30 ET · CPI mid-month 08:30 ET · PCE end of month · jobless claims every Thursday 08:30 ET',
+        'FOMC 8 times/year 14:00 ET (01:00 BKK) — on FOMC day, no new trades before the announcement',
+        'London fix 10:30 / 15:00 London and COMEX option expiry at month end = points where price often swings abnormally',
     ],
 };
 
@@ -279,7 +279,7 @@ const XAU_NEWS_KEYWORDS = [
 
 export const XAUUSD_PROFILE: InstrumentProfile = {
     key: 'XAUUSD',
-    name_th: 'ทองคำ',
+    name_th: 'Gold',
     emoji: '🥇',
     kind: 'metal',
     symbolName: 'XAUUSD',
@@ -304,7 +304,7 @@ export const XAUUSD_PROFILE: InstrumentProfile = {
     readingGuide: READING_GUIDE,
     news: { feeds: NEWS_FEEDS, keywords: XAU_NEWS_KEYWORDS },
     brief: XAU_BRIEF,
-    typicalDailyRange_th: '$20–50+ ต่อวัน',
+    typicalDailyRange_th: '$20–50+ per day',
 };
 
 // ---------------- Forex ----------------
@@ -315,7 +315,7 @@ const FX_SESSION_EU: SessionSpec = {
         [8 * 60, 12 * 60],
     ],
     intradayWindow: [150, 12 * 60 + 30],
-    blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (ข่าว US 08:30 / ECB 08:15)' }],
+    blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30 / ECB 08:15)' }],
     fridayCutoff: 12 * 60,
 };
 
@@ -326,8 +326,8 @@ const FX_SESSION_GBP: SessionSpec = {
     ],
     intradayWindow: [150, 12 * 60 + 30],
     blackouts: [
-        { from: 2 * 60, to: 2 * 60 + 30, label_th: 'news blackout 02:00-02:30 ET (ข้อมูล UK 07:00 London)' },
-        { from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (ข่าว US 08:30)' },
+        { from: 2 * 60, to: 2 * 60 + 30, label_th: 'news blackout 02:00-02:30 ET (UK data 07:00 London)' },
+        { from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30)' },
     ],
     fridayCutoff: 12 * 60,
 };
@@ -340,7 +340,7 @@ const FX_SESSION_JPY: SessionSpec = {
         [8 * 60, 12 * 60],
     ],
     intradayWindow: [150, 12 * 60 + 30],
-    blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (ข่าว US 08:30)' }],
+    blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30)' }],
     fridayCutoff: 12 * 60,
 };
 
@@ -417,7 +417,7 @@ function fxProfile(
 }
 
 export const EURUSD_PROFILE = fxProfile('EURUSD', {
-    name_th: 'ยูโร/ดอลลาร์',
+    name_th: 'Euro/US Dollar',
     emoji: '🇪🇺',
     symbolIdEnv: 'FX_EURUSD_SYMBOL_ID',
     digits: 5,
@@ -427,12 +427,22 @@ export const EURUSD_PROFILE = fxProfile('EURUSD', {
     scalp: { min: 0.0008, max: 0.0015, breakCap: 0.0012 },
     session: FX_SESSION_EU,
     companions: [
-        { sym: 'dxy', wFast: -1, wSlow: -1, label_th: 'DXY สวน EURUSD (EUR คือ 57% ของตะกร้า DXY)' },
-        { sym: 'us10y', wFast: -0.5, wSlow: -0.5, label_th: 'US10Y ขึ้น = ส่วนต่างดอกเบี้ยหนุน USD กด EURUSD' },
-        { sym: 'vix', wFast: -0.5, wSlow: -0.5, label_th: 'VIX ขึ้น = risk-off หนีเข้า USD กด EURUSD' },
-        { sym: 'spy', wFast: 0.5, wSlow: 0.5, label_th: 'SPY risk-on = USD อ่อน หนุน EURUSD' },
-        { sym: 'gbpusd', wFast: 0.75, wSlow: 0.75, label_th: 'GBPUSD เพื่อนร่วมเผ่ายุโรป (corr +0.8)' },
-        { sym: 'usdchf', wFast: -0.75, wSlow: -0.75, label_th: 'USDCHF สวนทาง EURUSD เกือบกระจก (corr −0.9)' },
+        { sym: 'dxy', wFast: -1, wSlow: -1, label_th: 'DXY inverse to EURUSD (EUR is 57% of the DXY basket)' },
+        {
+            sym: 'us10y',
+            wFast: -0.5,
+            wSlow: -0.5,
+            label_th: 'US10Y up = rate differential supports USD, pressures EURUSD',
+        },
+        { sym: 'vix', wFast: -0.5, wSlow: -0.5, label_th: 'VIX up = risk-off flight to USD, pressures EURUSD' },
+        { sym: 'spy', wFast: 0.5, wSlow: 0.5, label_th: 'SPY risk-on = weaker USD, supports EURUSD' },
+        { sym: 'gbpusd', wFast: 0.75, wSlow: 0.75, label_th: 'GBPUSD European peer (corr +0.8)' },
+        {
+            sym: 'usdchf',
+            wFast: -0.75,
+            wSlow: -0.75,
+            label_th: 'USDCHF moves opposite EURUSD, near mirror image (corr −0.9)',
+        },
     ],
     keywords: [
         'euro',
@@ -448,11 +458,11 @@ export const EURUSD_PROFILE = fxProfile('EURUSD', {
         'eu ',
         'european',
     ],
-    typicalDailyRange_th: '60–90 pips ต่อวัน',
+    typicalDailyRange_th: '60–90 pips per day',
 });
 
 export const GBPUSD_PROFILE = fxProfile('GBPUSD', {
-    name_th: 'ปอนด์/ดอลลาร์',
+    name_th: 'Pound/US Dollar',
     emoji: '🇬🇧',
     symbolIdEnv: 'FX_GBPUSD_SYMBOL_ID',
     digits: 5,
@@ -462,12 +472,17 @@ export const GBPUSD_PROFILE = fxProfile('GBPUSD', {
     scalp: { min: 0.001, max: 0.002, breakCap: 0.0015 },
     session: FX_SESSION_GBP,
     companions: [
-        { sym: 'dxy', wFast: -1, wSlow: -1, label_th: 'DXY สวน GBPUSD' },
-        { sym: 'us10y', wFast: -0.5, wSlow: -0.5, label_th: 'US10Y ขึ้น = หนุน USD กด GBPUSD' },
-        { sym: 'vix', wFast: -0.75, wSlow: -0.5, label_th: 'VIX ขึ้น = risk-off ปอนด์โดนขายแรงกว่ายูโร' },
-        { sym: 'spy', wFast: 0.5, wSlow: 0.5, label_th: 'SPY risk-on หนุนสกุล beta สูงอย่าง GBP' },
-        { sym: 'eurusd', wFast: 0.75, wSlow: 0.75, label_th: 'EURUSD เพื่อนร่วมเผ่ายุโรป (corr +0.8)' },
-        { sym: 'usdchf', wFast: -0.5, wSlow: -0.5, label_th: 'USDCHF สวนทาง (ตัวแทนความแข็งของ USD ฝั่งยุโรป)' },
+        { sym: 'dxy', wFast: -1, wSlow: -1, label_th: 'DXY inverse to GBPUSD' },
+        { sym: 'us10y', wFast: -0.5, wSlow: -0.5, label_th: 'US10Y up = supports USD, pressures GBPUSD' },
+        { sym: 'vix', wFast: -0.75, wSlow: -0.5, label_th: 'VIX up = risk-off, pound sold harder than the euro' },
+        { sym: 'spy', wFast: 0.5, wSlow: 0.5, label_th: 'SPY risk-on supports high-beta currencies like GBP' },
+        { sym: 'eurusd', wFast: 0.75, wSlow: 0.75, label_th: 'EURUSD European peer (corr +0.8)' },
+        {
+            sym: 'usdchf',
+            wFast: -0.5,
+            wSlow: -0.5,
+            label_th: 'USDCHF moves opposite (proxy for USD strength on the European side)',
+        },
     ],
     keywords: [
         'pound',
@@ -483,11 +498,11 @@ export const GBPUSD_PROFILE = fxProfile('GBPUSD', {
         'gilt',
         'london',
     ],
-    typicalDailyRange_th: '80–120 pips ต่อวัน',
+    typicalDailyRange_th: '80–120 pips per day',
 });
 
 export const USDJPY_PROFILE = fxProfile('USDJPY', {
-    name_th: 'ดอลลาร์/เยน',
+    name_th: 'US Dollar/Yen',
     emoji: '🇯🇵',
     symbolIdEnv: 'FX_USDJPY_SYMBOL_ID',
     digits: 3,
@@ -497,17 +512,27 @@ export const USDJPY_PROFILE = fxProfile('USDJPY', {
         step: 0.5,
         buffer: 0.03,
         tpBuffer: 0.04,
-        label_th: 'เลขกลม xx.00 / xx.50 (big figure ทุก 1.00 = ด่านใหญ่)',
+        label_th: 'Round numbers xx.00 / xx.50 (big figure every 1.00 = major level)',
     },
     scalp: { min: 0.08, max: 0.15, breakCap: 0.12 },
     session: FX_SESSION_JPY,
     companions: [
-        { sym: 'us10y', wFast: 1, wSlow: 1, label_th: 'US10Y = ตัวขับหลัก (ส่วนต่าง yield US−JP) ขึ้นหนุน USDJPY' },
-        { sym: 'dxy', wFast: 0.75, wSlow: 0.75, label_th: 'DXY แข็ง หนุน USDJPY' },
-        { sym: 'vix', wFast: -0.75, wSlow: -0.75, label_th: 'VIX ขึ้น = risk-off เยนแข็ง (unwind carry) กด USDJPY' },
-        { sym: 'spy', wFast: 0.5, wSlow: 0.5, label_th: 'SPY risk-on = carry trade เดินต่อ หนุน USDJPY' },
-        { sym: 'nikkei', wFast: 0.5, wSlow: 0.5, label_th: 'Nikkei ขึ้น = risk-on ญี่ปุ่น เยนอ่อน' },
-        { sym: 'wti', wFast: 0.25, wSlow: 0.25, label_th: 'น้ำมันแพง = ญี่ปุ่นนำเข้าพลังงาน เยนอ่อน' },
+        {
+            sym: 'us10y',
+            wFast: 1,
+            wSlow: 1,
+            label_th: 'US10Y = main driver (US−JP yield spread), rising supports USDJPY',
+        },
+        { sym: 'dxy', wFast: 0.75, wSlow: 0.75, label_th: 'DXY strong supports USDJPY' },
+        {
+            sym: 'vix',
+            wFast: -0.75,
+            wSlow: -0.75,
+            label_th: 'VIX up = risk-off, yen strengthens (carry unwind), pressures USDJPY',
+        },
+        { sym: 'spy', wFast: 0.5, wSlow: 0.5, label_th: 'SPY risk-on = carry trade continues, supports USDJPY' },
+        { sym: 'nikkei', wFast: 0.5, wSlow: 0.5, label_th: 'Nikkei up = Japan risk-on, weaker yen' },
+        { sym: 'wti', wFast: 0.25, wSlow: 0.25, label_th: 'Expensive oil = Japan imports energy, weaker yen' },
     ],
     keywords: [
         'yen',
@@ -524,7 +549,7 @@ export const USDJPY_PROFILE = fxProfile('USDJPY', {
         'nikkei',
         'carry trade',
     ],
-    typicalDailyRange_th: '70–120 pips (0.70–1.20 เยน) ต่อวัน',
+    typicalDailyRange_th: '70–120 pips (0.70–1.20 yen) per day',
 });
 
 export const INSTRUMENTS: Record<InstrumentKey, InstrumentProfile> = {

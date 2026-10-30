@@ -6,7 +6,7 @@ import { log } from '../../logging/logger.js';
 import { loginBody, USERNAME_PATTERN } from '../validation.js';
 
 export const PASSWORD_CHANGE_MESSAGE =
-    'You must change your password on the main zTraderService dashboard before you can sign in here.';
+    'You must change your password on the main Z Trader dashboard before you can sign in here.';
 
 const TOO_MANY_ATTEMPTS = 'too many attempts, try again later';
 

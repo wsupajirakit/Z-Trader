@@ -139,8 +139,8 @@ describe('responses and errors', () => {
 
   it.each([
     [
-      { statusCode: 400, message: 'mode ต้องเป็น scalp', error: 'Bad Request' },
-      'mode ต้องเป็น scalp',
+      { statusCode: 400, message: 'mode must be scalp', error: 'Bad Request' },
+      'mode must be scalp',
     ],
     [
       { statusCode: 400, message: ['a must be a number', 'b is required'] },

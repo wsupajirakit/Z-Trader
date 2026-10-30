@@ -78,8 +78,8 @@ const goodProposal = {
     entry: 3995, sl: 3992, tp1: 4001, tp2: 4004,   // risk 3 (~1.5×ATR) · reward 6 → R:R 2.0
     size: 'half', confidence: 7, playbook_ref: 'scalp #1',
     key_levels: 'Asian low 3992 · เลขกลม 4000',
-    risk_note_th: 'ใกล้เลขกลม 4000', reason_th: 'sweep ใต้ Asian low แล้วดีดกลับ (scalp #1) — TA รอแท่งปิดยืนยันจึงพลาด',
-    news_risk_th: 'CPI 19:30 ไทย', invalidation_th: 'ปิดต่ำกว่า 3985',
+    risk_note: 'ใกล้เลขกลม 4000', reason: 'sweep ใต้ Asian low แล้วดีดกลับ (scalp #1) — TA รอแท่งปิดยืนยันจึงพลาด',
+    news_risk: 'CPI 19:30 ไทย', invalidation: 'ปิดต่ำกว่า 3985',
 };
 
 // automate ปลอม — เรียกเฉพาะ private helper ที่ทดสอบ
@@ -108,19 +108,19 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
     t('เรียก generateContent ครั้งเดียว', captured.length === 1);
     t('ใช้ PROPOSAL_SCHEMA (มี action/order_type/playbook_ref)',
         ['action', 'order_type', 'playbook_ref'].every((k) => k in (req.config?.responseJsonSchema?.properties || {})));
-    t('system: บอกว่าเป็น "นักวิเคราะห์หลัก" ไม่ใช่ผู้ตรวจ', sys.includes('นักวิเคราะห์หลัก'));
-    t('system: ตั้ง NO_TRADE เป็นค่าตั้งต้น', sys.includes('ค่าตั้งต้นคือ **NO_TRADE**'));
-    t('system: บังคับอธิบายว่าทำไม TA พลาด', sys.includes('ทำไม TA ถึงพลาดไม้นี้'));
-    t('system: ห้าม market order', sys.includes('ห้าม market order'));
-    t('system: จำกัดขนาดไม้ไม่เกินครึ่ง', sys.includes('ไม่เกินครึ่ง'));
+    t('system: บอกว่าเป็น "นักวิเคราะห์หลัก" ไม่ใช่ผู้ตรวจ', sys.includes('lead analyst'));
+    t('system: ตั้ง NO_TRADE เป็นค่าตั้งต้น', sys.includes('The default is **NO_TRADE**'));
+    t('system: บังคับอธิบายว่าทำไม TA พลาด', sys.includes('why TA missed this trade'));
+    t('system: ห้าม market order', sys.includes('no market order'));
+    t('system: จำกัดขนาดไม้ไม่เกินครึ่ง', sys.includes('caps it at half'));
     t('system: มี playbook ครบทุกข้อของโหมด',
         XAUUSD_PROFILE.modes.scalp.playbook.every((p) => sys.includes(p.slice(0, 40))));
-    t('system: ระบุ R:R ขั้นต่ำของโหมด', sys.includes(`R:R ขั้นต่ำที่ TP1: ${XAUUSD_PROFILE.modes.scalp.rrMin}:1`));
+    t('system: ระบุ R:R ขั้นต่ำของโหมด', sys.includes(`Minimum R:R at TP1: ${XAUUSD_PROFILE.modes.scalp.rrMin}:1`));
     t('system: เตือนเลขกลมของตราสาร', sys.includes(String(XAUUSD_PROFILE.round.step)));
-    t('user: บอกว่า TA ไม่เจอ setup', usr.includes('TA ไม่เจอ setup'));
+    t('user: บอกว่า TA ไม่เจอ setup', usr.includes('TA found no setup'));
     t('user: มีบล็อกข้อมูลราคา + ระดับที่คำนวณให้ + ตัวประกอบ + ข่าว',
-        usr.includes('## ข้อมูลราคา') && usr.includes('## ระดับที่คำนวณให้') && usr.includes('## ตัวประกอบ') && usr.includes('## ข่าว'));
-    t('user: ไม่มีบล็อก "ไม้ที่ TA เสนอมา"', !usr.includes('ไม้ที่ระบบกฎ (TA) เสนอมา'));
+        usr.includes('## Price data') && usr.includes('## Computed levels') && usr.includes('## Companions') && usr.includes('## Latest news'));
+    t('user: ไม่มีบล็อก "ไม้ที่ TA เสนอมา"', !usr.includes('Trade proposed by the rule engine (TA)'));
     t('parse: คืนข้อเสนอครบ', out && out.action === 'TRADE' && out.entry === 3995 && out.playbook_ref === 'scalp #1');
 
     console.log('\n=== 2. propose(): คำตอบผิดรูปแบบ = null (ไม่มีไม้) ===');
@@ -158,7 +158,7 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
 
     t('ไม้ที่ดี → ผ่านเป็น BUY_LIMIT', ok.order_type === 'BUY_LIMIT' && ok.entry === 3995);
     t('คำนวณ R:R ให้เอง ไม่เชื่อ AI', ok.rr_tp1 === 2);
-    t('ติดป้ายว่ามาจาก AI ไม่ใช่ TA', ok.reason.startsWith('AI หาไม้เอง (lead)') && ok.analysis_summary_th.includes('🤖'));
+    t('ติดป้ายว่ามาจาก AI ไม่ใช่ TA', ok.reason.startsWith('AI found the trade (lead)') && ok.analysis_summary.includes('🤖'));
     t('เก็บ playbook_ref ที่ AI อ้าง', ok.playbook_ref === 'scalp #1');
     t('ตั้งวันหมดอายุออเดอร์ให้', typeof ok.valid_until_utc === 'string' && ok.valid_until_utc.endsWith('Z'));
 
@@ -275,24 +275,24 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
         const { classifyNoTrade, NEAR_MISS_RULES } = require(path.join(OUT, 'analysis/gold-ta.service'));
         // ข้อความจริงที่ดึงมาจาก archive (ไม่ได้แต่งขึ้น)
         const REAL = [
-            ['ยังไม่มีแท่ง 15m ปิดนอกกรอบเอเชีย — รอ break ที่ยืนยันด้วยแท่งปิดก่อน (กัน false breakout)', 'await-confirm-bar'],
-            ['SL โครงสร้างกว้าง 1.9×ATR(1d) เกินเกณฑ์ 1.5 — ไม้นี้ risk ไม่คุ้ม', 'sl-slightly-wide'],
-            ['ราคาอยู่ในโซน pullback แต่ยังไม่มีแท่งกลับตัวยืนยัน (swing #2) — รอ', 'await-reversal-bar'],
-            ['ทิศ 4H (ขึ้น) ขัดกับ regime 1d (ราคาใต้ EMA200(1d) 4306.48) — ช่วงเปลี่ยนผ่าน ไม่เทรด', 'tf-regime-conflict'],
-            ['เป้าที่สมจริง (หลบเลขกลม/แม่เหล็ก) ให้ R:R 0.78 < เกณฑ์ 2 — ไม่คุ้ม (playbook swing #2)', 'rr-just-below'],
-            ['มีแท่งปิดนอกกรอบแต่ RVOL 1.18 < 1.2 — break ไร้แรง volume ไม่หนุน (ORB evidence)', 'rvol-just-below'],
-            ['ราคาเลยโซน pullback ไปแล้ว 103.22 (1.1×ATR) — โครงสร้างเสีย รอ leg ใหม่', 'past-zone'],
+            ['No 15m bar has closed outside the Asian range yet — wait for a break confirmed by a closed bar first (avoid false breakout)', 'await-confirm-bar'],
+            ['Structural SL too wide 1.9×ATR(1d), above the 1.5 limit — risk not worth it on this trade', 'sl-slightly-wide'],
+            ['Price is in the pullback zone but no reversal bar has confirmed yet (swing #2) — wait', 'await-reversal-bar'],
+            ['4H direction (up) conflicts with the 1d regime (price below EMA200(1d) 4306.48) — transition phase, no trade', 'tf-regime-conflict'],
+            ['Realistic target (avoiding round numbers/magnets) gives R:R 0.78 < threshold 2 — not worth it (playbook swing #2)', 'rr-just-below'],
+            ['A bar closed outside the range but RVOL 1.18 < 1.2 — breakout lacks force, volume not supportive (ORB evidence)', 'rvol-just-below'],
+            ['Price already past the pullback zone by 103.22 (1.1×ATR) — structure broken, wait for a new leg', 'past-zone'],
         ];
         for (const [reason, id] of REAL) {
             const c = classifyNoTrade(reason);
             t(`เฉียด: ${id}`, c.near_miss === true && c.near_miss_rule === id, JSON.stringify(c));
         }
         const NOT_NEAR = [
-            'ไม่มี setup sweep/break-retest ที่เข้าเกณฑ์ในรอบนี้ — NO-TRADE ตามวินัย scalp',
-            'กรอบเอเชียวันนี้ยังไม่ครบ (ก่อน 14:00 ไทย) — รอ London (intraday #1)',
-            'ราคาวิ่งหนีขอบกรอบไปไกลแล้ว — เป้า 1.5×กรอบใกล้หมด ไม่ไล่',
-            'ราคากลับเข้ากรอบลึกหลังทะลุ (fake breakout) — ยกเลิก setup ตามวินัย',
-            'ข้อมูล 4h/1d/1h ไม่พอ',
+            'No qualifying sweep/break-retest setup this round — NO-TRADE per scalp discipline',
+            'Asian range for today is not complete yet (before 14:00 BKK) — wait for London (intraday #1)',
+            'Price has already run far from the range edge — the 1.5×range target is nearly used up, not chasing',
+            'Price fell back deep into the range after breaking out (fake breakout) — setup cancelled per discipline',
+            'Not enough 4h/1d/1h data',
         ];
         for (const r of NOT_NEAR) {
             const c = classifyNoTrade(r);
@@ -332,7 +332,7 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
     await eu.propose('intraday', null, runtime, { profile: EURUSD_PROFILE, news: [], now: new Date(NOW) });
     const eusys = String(captured[0]?.config?.systemInstruction || '');
     t('system ใช้ persona/ตราสารของ EURUSD', eusys.includes('EURUSD') && !eusys.includes('XAUUSD'));
-    t('system ระบุทศนิยม 5 ตำแหน่ง', eusys.includes('ทศนิยม 5 ตำแหน่ง'));
+    t('system ระบุทศนิยม 5 ตำแหน่ง', eusys.includes('5 decimals'));
     t('system ใช้ playbook ของ intraday EURUSD',
         EURUSD_PROFILE.modes.intraday.playbook.every((p) => eusys.includes(p.slice(0, 40))));
 

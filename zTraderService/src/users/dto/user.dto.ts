@@ -11,7 +11,7 @@ export const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
 export class CreateUserDto {
     @Transform(lower)
     @IsString()
-    @Matches(USERNAME_PATTERN, { message: 'username ต้องเป็น a-z 0-9 . _ - ยาว 3–32 ตัว' })
+    @Matches(USERNAME_PATTERN, { message: 'username must be a-z 0-9 . _ - and 3–32 characters long' })
     username!: string;
 
     @Transform(trim)

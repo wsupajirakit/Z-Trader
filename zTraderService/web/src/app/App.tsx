@@ -1,5 +1,7 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
+import { DialogProvider } from '../components/dialogs/DialogProvider';
+import { AppThemeProvider } from '../theme/AppThemeProvider';
 import type { AppRouter } from './router';
 
 export function App({
@@ -10,8 +12,12 @@ export function App({
   router: AppRouter;
 }) {
   return (
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <AppThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <DialogProvider>
+          <RouterProvider router={router} />
+        </DialogProvider>
+      </QueryClientProvider>
+    </AppThemeProvider>
   );
 }

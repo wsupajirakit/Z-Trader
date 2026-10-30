@@ -48,7 +48,9 @@ docker compose --env-file .env.compose --profile actor up -d --build
 open http://127.0.0.1:3000
 ```
 
-The actor calls `http://service:6500` over the internal network with the same `API_KEY`.
+The actor calls `http://service:6500` over the internal network with the same `API_KEY`. The service in turn
+calls the actor at `ACTOR_URL` (compose default `http://actor:3000`) for the dashboard's Strategy page; without
+the `actor` profile that page just reports "Actor unreachable".
 
 Other useful commands:
 
@@ -86,7 +88,7 @@ and all secrets are injected at runtime as environment variables.
 
 On the first start, when the `users` collection is empty, the app creates an admin from
 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD`. The username is 3-32 chars of `a-z 0-9 . _ -`,
-and the password is at least 12 chars.
+and the password is at least 9 chars.
 
 1. Set both in `.env.compose` and start the stack. The log shows
    `created bootstrap admin "<name>" — remove BOOTSTRAP_ADMIN_* from the environment now`.

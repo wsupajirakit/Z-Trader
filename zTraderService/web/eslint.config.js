@@ -26,6 +26,8 @@ export default defineConfig(
     },
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
+      // async click handlers in JSX are fine: React ignores the returned promise
+      '@typescript-eslint/no-misused-promises': ['error', { checksVoidReturn: { attributes: false } }],
       '@typescript-eslint/no-explicit-any': 'error',
       // TanStack Router's redirect() is thrown by design.
       '@typescript-eslint/only-throw-error': [
@@ -40,7 +42,7 @@ export default defineConfig(
           ],
         },
       ],
-      // Ported copy builds Thai sentences from numbers; string + number is intended.
+      // UI copy builds sentences from numbers; string + number is intended.
       '@typescript-eslint/restrict-template-expressions': [
         'error',
         { allowNumber: true },
@@ -65,6 +67,10 @@ export default defineConfig(
       pluginRouter.configs['flat/recommended'],
     ],
     languageOptions: { globals: globals.browser },
+    rules: {
+      // TanStack Router's createLink() wraps a component the same way memo/forwardRef do
+      'react-refresh/only-export-components': ['error', { allowConstantExport: true, extraHOCs: ['createLink'] }],
+    },
   },
   {
     files: ['src/**/*.test.{ts,tsx}', 'src/test/**'],

@@ -166,9 +166,10 @@ export class KlinesController {
             M30: 8,
             H1: 9,
             H4: 10,
-            D1: 11,
-            W1: 12,
-            MN1: 13,
+            H12: 11,
+            D1: 12,
+            W1: 13,
+            MN1: 14,
         };
         return mapping[period.toUpperCase()] || 5;
     }

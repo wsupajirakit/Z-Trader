@@ -68,7 +68,7 @@ export class GoldInstrumentService {
     setActive(key: string): InstrumentProfile {
         const k = (key ?? '').toUpperCase();
         if (!isInstrumentKey(k))
-            throw new DomainError(`ไม่รู้จักตราสาร "${key}" — เลือกได้: ${INSTRUMENT_KEYS.join(', ')}`);
+            throw new DomainError(`Unknown instrument "${key}" — choose one of: ${INSTRUMENT_KEYS.join(', ')}`);
         this.runtimeKey = k;
         this.logger.log(`active instrument → ${k}`);
         return INSTRUMENTS[k];
@@ -97,12 +97,12 @@ export class GoldInstrumentService {
             return known;
         }
         if (!this.ctraderService.isAuthorized)
-            throw new DomainError(`หา symbolId ของ ${p.key} ไม่ได้: cTrader ยังไม่ authorized`);
+            throw new DomainError(`Cannot resolve symbolId for ${p.key}: cTrader is not authorized yet`);
         const symbols = await this.symbolList();
         const hit = symbols.find((s) => String(s.symbolName ?? '').toUpperCase() === p.symbolName.toUpperCase());
         if (!hit)
             throw new Error(
-                `ไม่พบ symbol ${p.symbolName} บนบัญชี cTrader นี้ (ตั้ง ${p.symbolIdEnv} ใน env ถ้าชื่อต่างกัน)`,
+                `Symbol ${p.symbolName} not found on this cTrader account (set ${p.symbolIdEnv} in env if the name differs)`,
             );
         const id = Number(hit.symbolId);
         this.remember(p.key, id);
@@ -151,14 +151,14 @@ export class GoldInstrumentService {
                 ok++;
             } catch (e) {
                 this.logger.warn(
-                    `resolve ${key} ไม่สำเร็จ: ${errorMessage(e)} — ไม้ของตราสารนี้จะยังดูแลไม่ได้จนกว่าจะ resolve ได้`,
+                    `Failed to resolve ${key}: ${errorMessage(e)} — positions in this instrument cannot be managed until it resolves`,
                 );
             }
         }
         // ครบทุกตัวแล้วค่อยหยุดลอง — ไม่งั้นลองใหม่ทุกรอบ tick
         if (ok === INSTRUMENT_KEYS.length) {
             this.resolvedAll = true;
-            this.logger.log(`resolve symbolId ครบทุกตราสารแล้ว (${INSTRUMENT_KEYS.length} ตัว)`);
+            this.logger.log(`Resolved symbolId for all instruments (${INSTRUMENT_KEYS.length})`);
             void this.verifyDigits();
         }
     }
@@ -186,14 +186,14 @@ export class GoldInstrumentService {
                 if (d == null) continue;
                 if (Number(d) !== prof.digits) {
                     this.logger.error(
-                        `⚠ ${key}: broker ใช้ทศนิยม ${d} ตำแหน่ง แต่ profile ตั้งไว้ ${prof.digits} ` +
-                            '— ราคา/SL/TP อาจถูกปัดผิดหรือโดน broker ปฏิเสธ ตรวจ instruments.ts ก่อนเทรดคู่นี้',
+                        `⚠ ${key}: broker uses ${d} decimal places but the profile is set to ${prof.digits} ` +
+                            '— prices/SL/TP may be rounded wrongly or rejected by the broker; check instruments.ts before trading this pair',
                     );
                 } else {
-                    this.logger.log(`digits ${key} ตรงกับ broker (${d})`);
+                    this.logger.log(`digits for ${key} match the broker (${d})`);
                 }
             } catch (e) {
-                this.logger.warn(`เช็ค digits ของ ${key} ไม่ได้: ${errorMessage(e)}`);
+                this.logger.warn(`Could not check digits for ${key}: ${errorMessage(e)}`);
             }
         }
     }

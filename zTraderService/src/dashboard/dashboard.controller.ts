@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Logger, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
+import { AccountService } from '../account/account.service';
 import { AuditService } from '../audit/audit.service';
 import { CurrentSession, RequireRole } from '../common/auth/auth.decorators';
 import type { SessionPrincipal } from '../common/auth/principal';
@@ -48,6 +49,7 @@ export class DashboardController {
         private readonly ctrader: CtraderService,
         private readonly instruments: GoldInstrumentService,
         private readonly audit: AuditService,
+        private readonly account: AccountService,
     ) {}
 
     // ---------------- reads (viewer) ----------------
@@ -55,6 +57,12 @@ export class DashboardController {
     @Get('status')
     status() {
         return this.automate.getStatus();
+    }
+
+    /** balance of the connected cTrader account (status bar, % risk profiles) */
+    @Get('account')
+    accountSummary() {
+        return this.account.summary();
     }
 
     @Get('modes')
@@ -199,7 +207,7 @@ export class DashboardController {
     @Post('reject')
     @RequireRole('operator')
     reject(@CurrentSession() s: SessionPrincipal, @Req() req: Request, @Body() body: RejectDto) {
-        const reason = body.reason ?? `ปัดตกจาก dashboard (${s.user.username})`;
+        const reason = body.reason ?? `Rejected from the dashboard (${s.user.username})`;
         return this.act(s, req, 'trade.reject', body.id, { ...body }, () => ({
             rejected: this.automate.rejectPending(body.mode, body.id, reason),
         }));

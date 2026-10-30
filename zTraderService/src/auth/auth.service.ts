@@ -23,7 +23,7 @@ export interface ClientContext {
     userAgent: string;
 }
 
-const BAD_CREDENTIALS = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+const BAD_CREDENTIALS = 'Invalid username or password';
 
 @Injectable()
 export class AuthService implements OnApplicationBootstrap {
@@ -193,10 +193,10 @@ export class AuthService implements OnApplicationBootstrap {
                 success: false,
                 detail: { reason: 'bad_current' },
             });
-            throw new UnauthorizedException('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+            throw new UnauthorizedException('Current password is incorrect');
         }
         if (currentPassword === newPassword)
-            throw new HttpException('รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสเดิม', HttpStatus.BAD_REQUEST);
+            throw new HttpException('New password must differ from the current password', HttpStatus.BAD_REQUEST);
         const problem = passwordProblem(newPassword, user.username);
         if (problem) throw new HttpException(problem, HttpStatus.BAD_REQUEST);
         await this.users.setPassword(principal.user.id, newPassword, false);

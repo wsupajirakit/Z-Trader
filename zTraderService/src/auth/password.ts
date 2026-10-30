@@ -15,7 +15,7 @@ const PARAMS = { logN: 15, r: 8, p: 3 };
 const KEY_LEN = 64;
 const SALT_LEN = 16;
 
-export const PASSWORD_MIN = 12;
+export const PASSWORD_MIN = 9;
 export const PASSWORD_MAX = 128;
 
 export async function hashPassword(password: string): Promise<string> {
@@ -39,10 +39,10 @@ export function needsRehash(stored: string): boolean {
 /** returns a reason in Thai when the password is not acceptable, otherwise null */
 export function passwordProblem(password: string, username: string): string | null {
     if (typeof password !== 'string' || password.length < PASSWORD_MIN)
-        return `รหัสผ่านต้องยาวอย่างน้อย ${PASSWORD_MIN} ตัวอักษร`;
-    if (password.length > PASSWORD_MAX) return `รหัสผ่านต้องไม่เกิน ${PASSWORD_MAX} ตัวอักษร`;
+        return `Password must be at least ${PASSWORD_MIN} characters`;
+    if (password.length > PASSWORD_MAX) return `Password must be at most ${PASSWORD_MAX} characters`;
     if (username && password.toLowerCase().includes(username.toLowerCase()))
-        return 'รหัสผ่านต้องไม่มีชื่อผู้ใช้อยู่ข้างใน';
+        return 'Password must not contain the username';
     return null;
 }
 

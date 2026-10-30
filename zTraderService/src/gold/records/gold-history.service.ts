@@ -29,6 +29,8 @@ export interface TradeRow {
     entry_reason: string | null; // why we entered (gold bot orders)
     playbook: string | null;
     archive_file: string | null; // TA context of the round that opened it
+    risk_profile: string | null; // risk profile at entry (orders placed before profiles existed: null)
+    config_hash: string | null; // id of the exact configuration at entry (see round-context.ts)
 }
 
 /**
@@ -154,6 +156,8 @@ export class GoldHistoryService {
                     entry_reason: order?.reason || order?.message || null,
                     playbook: order?.playbookRef || null,
                     archive_file: order?.archiveFile || null,
+                    risk_profile: order?.riskProfile || null,
+                    config_hash: order?.configHash || null,
                 };
             })
             .sort((a, b) => b.closed_utc.localeCompare(a.closed_utc));

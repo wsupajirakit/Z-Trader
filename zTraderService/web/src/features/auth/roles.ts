@@ -13,7 +13,7 @@ export function hasRole(
 export const ROLES: readonly Role[] = ['viewer', 'operator', 'admin'];
 
 export const ROLE_LABEL: Record<Role, string> = {
-  viewer: 'viewer · ดูอย่างเดียว',
-  operator: 'operator · สั่งเทรด/ตั้งค่า',
-  admin: 'admin · จัดการผู้ใช้',
+  viewer: 'Viewer · read only',
+  operator: 'Operator · trade and settings',
+  admin: 'Admin · users and audit',
 };

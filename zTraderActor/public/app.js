@@ -140,7 +140,7 @@ async function refreshMe() {
         session.csrf = data.csrfToken;
         if (changed) {
             applyRole();
-            addLog(`[ทำ] role changed: ${data.user.role}`, 'warn');
+            addLog(`[Exec] role changed: ${data.user.role}`, 'warn');
         }
     } catch {
         /* signed out or offline */
@@ -185,7 +185,7 @@ function appendLogLine(el) {
 }
 
 function addLog(msg, cls) {
-    const t = new Date().toLocaleTimeString('th-TH');
+    const t = new Date().toLocaleTimeString('en-GB');
     appendLogLine(h('div', {}, h('span', { className: 't' }, `[${t}]`), h('span', { className: cls }, msg)));
 }
 
@@ -250,11 +250,11 @@ function updateHint() {
 async function runOnce() {
     const mode = $('modeSel').value;
     $('btnRun').disabled = true;
-    addLog(`[ทำ] สั่ง run รอบเดียว mode=${mode} …`, 'info');
+    addLog(`[Exec] single run requested mode=${mode} …`, 'info');
     try {
         const { data: d } = await api('/api/gold/run', { method: 'POST', body: { mode, force: true } });
         const outcome = d.outcome || d.error || JSON.stringify(d);
-        addLog(`[ผล ${mode}] ${outcome}`, String(d.outcome || '').startsWith('order sent') ? 'order' : 'info');
+        addLog(`[Result ${mode}] ${outcome}`, String(d.outcome || '').startsWith('order sent') ? 'order' : 'info');
     } catch (e) {
         if (!(e instanceof AuthError)) addLog('run error: ' + e.message, 'error');
     }
@@ -264,11 +264,14 @@ async function runOnce() {
 
 async function setLoop(enabled) {
     const modes = Array.from(document.querySelectorAll('#loopChecks input:checked')).map((c) => c.value);
-    if (enabled && !modes.length) return alert('เลือกอย่างน้อย 1 โหมด');
+    if (enabled && !modes.length) return alert('Select at least 1 mode');
     try {
         const { ok, data } = await api('/api/gold/automate', { method: 'POST', body: { enabled, modes } });
         if (!ok) return addLog('automate error: ' + (data.error || data.message || 'failed'), 'error');
-        addLog('[ทำ] auto loop ' + (enabled ? 'STARTED: ' + modes.join(', ') : 'STOPPED'), enabled ? 'order' : 'info');
+        addLog(
+            '[Exec] auto loop ' + (enabled ? 'STARTED: ' + modes.join(', ') : 'STOPPED'),
+            enabled ? 'order' : 'info',
+        );
     } catch {
         return;
     }
@@ -290,9 +293,11 @@ async function loadSettings() {
         $('setNote').textContent =
             'sizing: ' +
             s.sizing +
-            (overridden.length ? ` · แก้จาก dashboard ${overridden.length} ค่า` : ' · ใช้ค่าจาก .env');
+            (overridden.length
+                ? ` · ${overridden.length} value(s) overridden from dashboard`
+                : ' · using values from .env');
     } catch {
-        $('setNote').textContent = 'โหลดค่าไม่ได้';
+        $('setNote').textContent = 'Failed to load settings';
     }
 }
 
@@ -309,11 +314,11 @@ async function saveSettings() {
         };
         const { ok, data: d } = await api('/api/gold/settings', { method: 'POST', body });
         if (!ok) {
-            $('setNote').textContent = '❌ ' + (d.message || d.error || 'บันทึกไม่สำเร็จ');
+            $('setNote').textContent = '❌ ' + (d.message || d.error || 'Save failed');
         } else {
-            $('setNote').textContent = '✅ บันทึกแล้ว (มีผลทันที · อยู่จนกว่าจะรีสตาร์ท service)';
+            $('setNote').textContent = '✅ Saved (effective immediately · lasts until the service restarts)';
             addLog(
-                `[ทำ] ตั้งค่าความเสี่ยงใหม่: เสี่ยง $${d.risk_usd_per_trade}/ไม้ · daily stop $${d.daily_max_loss_usd} · ไม้ค้าง ${d.max_open_positions}`,
+                `[Exec] New risk settings: risk $${d.risk_usd_per_trade}/trade · daily stop $${d.daily_max_loss_usd} · open positions ${d.max_open_positions}`,
                 'warn',
             );
             loadSettings();
@@ -352,14 +357,14 @@ function modeCard(m, s) {
             h(
                 'span',
                 { className: 'mc-time' },
-                st && st.lastRunAt ? new Date(st.lastRunAt).toLocaleTimeString('th-TH') : 'ยังไม่เคยรัน',
+                st && st.lastRunAt ? new Date(st.lastRunAt).toLocaleTimeString('en-GB') : 'Never run',
             ),
         ),
         pend
             ? h(
                   'div',
                   { className: 'mc-outcome wait' },
-                  `⏳ รอ Claude ตรวจ (id ${pend.id}, เหลือ ${pend.ttl_sec}s): ${pend.order}`,
+                  `⏳ Awaiting Claude review (id ${pend.id}, ${pend.ttl_sec}s left): ${pend.order}`,
               )
             : null,
         h('div', { className: 'mc-outcome ' + outcomeClass(outcome) }, outcome || '—'),
@@ -398,7 +403,7 @@ async function refreshPositions() {
         const raw = Array.isArray(d) ? d : d.position || d.positions || [];
         const list = raw.filter((p) => Number(p && p.tradeData && p.tradeData.symbolId) === 41);
         if (!list.length) {
-            $('positions').textContent = 'ไม่มีไม้ค้าง';
+            $('positions').textContent = 'No open positions';
             return;
         }
         const head = h('tr', {}, ...['Side', 'Lots', 'Entry', 'SL', 'TP'].map((t) => h('th', {}, t)));
@@ -416,7 +421,7 @@ async function refreshPositions() {
         });
         $('positions').replaceChildren(h('table', {}, head, ...rows));
     } catch (e) {
-        if (!(e instanceof AuthError)) $('positions').textContent = 'โหลดไม่ได้';
+        if (!(e instanceof AuthError)) $('positions').textContent = 'Failed to load';
     }
 }
 
@@ -451,7 +456,7 @@ async function refreshArchive() {
                 );
             });
         if (links.length) $('archList').replaceChildren(...links);
-        else $('archList').textContent = 'ยังไม่มีประวัติ';
+        else $('archList').textContent = 'No history yet';
     } catch {
         /* ignore */
     }

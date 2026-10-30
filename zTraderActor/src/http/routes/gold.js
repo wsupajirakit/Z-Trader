@@ -31,13 +31,13 @@ export function goldRoutes({ api }) {
             if (upstream.status === 401 || upstream.status === 403) {
                 await upstream.body?.cancel();
                 log.error(`gold proxy ${method} ${path}: zTraderService answered ${upstream.status} (check API_KEY)`);
-                return res.status(502).json({ error: 'zTraderService rejected the actor credentials' });
+                return res.status(502).json({ error: 'Z Trader rejected the actor credentials' });
             }
             const text = await upstream.text();
             res.status(upstream.status).type('application/json').send(text);
         } catch (err) {
             log.error(`gold proxy ${method} ${path}: ${err.message}`);
-            res.status(502).json({ error: 'zTraderService unreachable' });
+            res.status(502).json({ error: 'Z Trader unreachable' });
         }
     }
 

@@ -18,7 +18,7 @@ export class TradeDispatcher {
     async executeTrade(params) {
         const { symbol, volume, side, orderType = 'MARKET', stopLoss, takeProfit, price, comment } = params;
 
-        tradeLog.status(`\n[ทำ] กำลังส่งคำสั่ง ${side} ${symbol} (Vol: ${volume})...`);
+        tradeLog.status(`\n[Exec] Sending order ${side} ${symbol} (Vol: ${volume})...`);
 
         const payload = {
             // No accountId: zTraderService decides which cTrader account trades (it only checks a sent one).
@@ -31,7 +31,7 @@ export class TradeDispatcher {
             takeProfit,
             price,
             mode: params.mode || this.mode,
-            comment: comment || 'zTraderActor',
+            comment: comment || 'Z Trader',
         };
 
         try {
@@ -40,7 +40,7 @@ export class TradeDispatcher {
             return data;
         } catch (error) {
             const errorMsg = error.data ? JSON.stringify(error.data) : error.message;
-            tradeLog.error(`\n[รอ] ส่งคำสั่งล้มเหลว [${side} ${symbol}]:`, errorMsg);
+            tradeLog.error(`\n[Wait] Order submission failed [${side} ${symbol}]:`, errorMsg);
             throw error;
         }
     }

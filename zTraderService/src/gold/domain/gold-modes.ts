@@ -88,16 +88,16 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
         ttl: 60,
         news: 10,
         rrMin: 1.5,
-        horizon: 'เข้า-ออกภายใน 1–4 ชั่วโมง',
-        tfRoles: '5m = TF สั่งการ (entry/SL) · 15m = TF บริบท (ทิศ/liquidity pools)',
+        horizon: 'In and out within 1–4 hours',
+        tfRoles: '5m = execution TF (entry/SL) · 15m = context TF (direction/liquidity pools)',
         slGuide:
-            'SL เหนือ/ใต้จุด sweep + buffer spread · หรือ 0.5–0.8 × ATR14(5m) · ห้ามวางตรงเลขกลม $50/$100 พอดี (โดนกวาดบ่อยสุด)',
+            'SL above/below the sweep point + spread buffer · or 0.5–0.8 × ATR14(5m) · never place exactly on a $50/$100 round number (swept most often)',
         playbook: [
-            'Setup หลัก A — Liquidity Sweep: ราคาแทงทะลุ high/low ชัด ๆ หรือเลขกลม ($xx50/$xx00) แล้วดีดกลับเข้า range ทันที (sweep+displacement) → เข้าที่ retest ของแนวที่เพิ่งทะลุ/FVG · เป้า = pool ฝั่งตรงข้าม · SL เลย sweep เล็กน้อย',
-            'Setup หลัก B — Break-Retest กรอบเอเชีย: ตี London open (14:00 ไทย / 03:00 ET) ราคาทะลุกรอบ Asian range แล้วย่อกลับมา retest ขอบกรอบ → เข้าตามทิศทะลุ · สถิติ: breakout วิ่งเฉลี่ย 1.5–2 เท่าของความกว้างกรอบเอเชีย',
-            'หน้าต่างทำเงินของโหมดนี้: London open 14:00-16:00 ไทย และ London-NY overlap 19:00-23:00 ไทย (08:00-12:00 ET = ช่วง volume สูงสุดของวัน) — นอกหน้าต่างนี้ (โดยเฉพาะหลังปิด NY ถึงเอเชียเปิด) spread กว้าง สัญญาณเชื่อไม่ได้ = NO-TRADE โดยปริยาย',
-            'เลขกลม: ทองหยุด/เด้ง/กลับตัวที่ระดับ $50 และ $100 อย่างเป็นระบบ — TP แรกอย่าตั้งข้ามเลขกลมถัดไป · entry ใกล้เลขกลมให้รอ sweep ก่อนไม่ดักหน้า',
-            'เป้าสมจริงต่อไม้: $2–4 (20–40 pips) · ข่าว 19:30 ไทย (08:30 ET: NFP/CPI/jobless) = NO-TRADE ±30 นาที — นาทีข่าวคือ timestamp ผันผวนสุดของสัปดาห์ spread ถ่างและ slippage แรง',
+            'Main setup A — Liquidity Sweep: price spikes clearly through a high/low or a round number ($xx50/$xx00) then snaps straight back into the range (sweep+displacement) → enter on the retest of the freshly broken level/FVG · target = the opposite-side pool · SL just beyond the sweep',
+            'Main setup B — Asian range Break-Retest: at London open (14:00 BKK / 03:00 ET) price breaks the Asian range then pulls back to retest the range edge → enter in the breakout direction · stats: breakouts run on average 1.5–2× the Asian range width',
+            'Money-making windows for this mode: London open 14:00-16:00 BKK and London-NY overlap 19:00-23:00 BKK (08:00-12:00 ET = highest-volume period of the day) — outside these windows (especially from NY close to Asia open) spreads are wide and signals unreliable = NO-TRADE by default',
+            'Round numbers: gold systematically stalls/bounces/reverses at $50 and $100 levels — do not set the first TP beyond the next round number · for entries near a round number wait for the sweep first, do not front-run',
+            'Realistic target per trade: $2–4 (20–40 pips) · news at 19:30 BKK (08:30 ET: NFP/CPI/jobless) = NO-TRADE ±30 minutes — news minutes are the most volatile timestamps of the week, spreads widen and slippage is heavy',
         ],
         sets: [
             { symbol: 'XAUUSD', tf: '5m', nBars: 500 },
@@ -111,15 +111,15 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
         ttl: 120,
         news: 15,
         rrMin: 1.8,
-        horizon: 'ถือหลักชั่วโมงถึงข้ามวัน (1–4 ชม. ขึ้นไป)',
-        tfRoles: '15m/30m = จังหวะเข้า · 1h = TF สั่งการทิศ',
-        slGuide: 'SL 0.8–1.2 × ATR14(1h) หรือใต้/เหนือขอบ Asian range ฝั่งตรงข้าม · หลบเลขกลม',
+        horizon: 'Hold for hours to overnight (1–4 h or more)',
+        tfRoles: '15m/30m = entry timing · 1h = direction TF',
+        slGuide: 'SL 0.8–1.2 × ATR14(1h) or below/above the opposite edge of the Asian range · avoid round numbers',
         playbook: [
-            'เกมหลักของโหมดนี้คือวงจร 3 session: เอเชีย (06:00-14:00 ไทย) สร้างกรอบวัน → London (14:00 ไทย) break หรือ reject กรอบ → ขี่ต่อเข้า NY (19:30 ไทย) — เป้ามาตรฐาน 1.5–2 เท่าของความกว้างกรอบเอเชีย',
-            'Setup A — London break: ทะลุ Asian high/low + ปิดแท่ง 15m/30m นอกกรอบ + retest ไม่หลุดกลับ → BUY STOP/SELL STOP ตามทิศ หรือเข้าที่ retest',
-            'Setup B — London reject (fade): แทงทะลุกรอบแล้วปิดกลับใน (fake breakout) → เล่นสวนไปเป้าขอบกรอบฝั่งตรงข้าม — ครึ่งไม้ของ Setup A',
-            'NY 19:30 ไทย (08:30 ET) data คือจุดเร่ง/กลับทางกลางวัน — ถือผ่านได้เฉพาะไม้ที่มีกำไร buffer แล้ว ไม้ใหม่ให้รอหลังข่าว 15-30 นาที · FOMC วัน = ห้ามเปิดก่อน 01:00 ไทย (14:00 ET)',
-            'ทิศระหว่างวันเช็คกับ DXY/US10Y 1h เสมอ: ทองสวน DXY (corr −0.5..−0.8) — ถ้าทองขึ้นพร้อม DXY ขึ้น = ขาที่อ่อนแอ อย่าไล่',
+            'The core game of this mode is the 3-session cycle: Asia (06:00-14:00 BKK) builds the day range → London (14:00 BKK) breaks or rejects the range → continuation into NY (19:30 BKK) — standard target 1.5–2× the Asian range width',
+            'Setup A — London break: break of the Asian high/low + a 15m/30m bar closing outside the range + retest that holds → BUY STOP/SELL STOP in the breakout direction or enter on the retest',
+            'Setup B — London reject (fade): spike through the range then close back inside (fake breakout) → trade against it toward the opposite range edge — half the size of Setup A',
+            'NY 19:30 BKK (08:30 ET) data is the intraday accelerator/reversal point — only hold through it with trades already in profit buffer; new trades wait 15-30 minutes after the news · FOMC day = no opening before 01:00 BKK (14:00 ET)',
+            'Always check intraday direction against DXY/US10Y 1h: gold moves inverse to DXY (corr −0.5..−0.8) — if gold rises together with DXY rising = a weak leg, do not chase',
         ],
         sets: [
             { symbol: 'XAUUSD', tf: '15m', nBars: 400 },
@@ -136,16 +136,16 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
         ttl: 300,
         news: 25,
         rrMin: 2.0,
-        horizon: 'ถือหลายวันถึงหลายสัปดาห์',
-        tfRoles: '1h = จังหวะเข้า · 4h = โครงสร้าง · 1d = TF สั่งการทิศใหญ่',
+        horizon: 'Hold for several days to several weeks',
+        tfRoles: '1h = entry timing · 4h = structure · 1d = primary direction TF',
         slGuide:
-            'SL ใต้/เหนือ swing low/high ของ pullback ที่ใช้เข้าเสมอ (ไม่ใช่ ATR ลอย ๆ ไม่ใช่เลขกลม) · ตรวจว่ากว้าง ≈ 1.0–1.5 × ATR14(1d)',
+            'SL always below/above the swing low/high of the pullback used for entry (not a floating ATR, not a round number) · check the width ≈ 1.0–1.5 × ATR14(1d)',
         playbook: [
-            'โครงหลัก (trend-pullback): ใช้ 4H EMA50 vs EMA200 เป็น trend filter (50>200 = เล่นฝั่ง BUY เท่านั้น) → รอ pullback เข้าโซนใดโซนหนึ่ง: EMA20/50 4H · Fib 38.2/50/61.8 ของขาล่าสุด (โซนลึก 61.8–78.6 = OTE ให้ RR ดีสุด) · หรือแนวต้านเก่าที่กลายเป็นแนวรับ',
-            'เข้าเมื่อมี confirmation เท่านั้น: แท่งกลับตัว (hammer/engulfing) บน 1H-4H · RSI divergence · หรือ break เส้นเทรนด์ย่อยของ pullback — ไม่มี confirmation = ตั้ง BUY LIMIT ที่โซนได้แต่ขนาดครึ่งเดียว',
-            'Macro overlay ก่อนสรุปทิศ: ความสัมพันธ์ทอง-REAL YIELD แบบเก่า (corr ≈ −0.82) แตกไปแล้วตั้งแต่ 2022 (เหลือ ~3-7% — ธนาคารกลางกลายเป็นผู้ซื้อหลัก ปี 2025 yields สูงสุดตั้งแต่ 2007 แต่ทองขึ้น 65%) → ใช้ US10Y เป็นตัวประกอบรองแบบ asymmetric: yields ลง = หนุนทองแรง แต่ yields ขึ้น = กดทองน้อยกว่าที่เคย ห้ามใช้ veto ฝั่ง BUY เพียงลำพัง · DXY ยังใช้ได้ corr −0.5..−0.8 · สัญญาณสถาบันสองแบบ: ① DXY ทำ new high แต่ทองไม่ทำ new low = bullish divergence (มีคนรับของ) ② yields+DXY ขึ้นแต่ทอง sideways = hidden accumulation',
-            'ระดับที่เป็นแม่เหล็ก: weekly open · prev week high/low · เลขกลม $100 — ใช้เป็นเป้า TP และจุดคาด reaction',
-            'XAGUSD ใช้คอนเฟิร์มเผ่า: silver นำขึ้น = ขาขึ้นโลหะแข็งแรง · ทองขึ้นเดี่ยว silver ไม่ตาม = ขาที่เปราะ',
+            'Core structure (trend-pullback): use 4H EMA50 vs EMA200 as the trend filter (50>200 = BUY side only) → wait for a pullback into one of the zones: 4H EMA20/50 · Fib 38.2/50/61.8 of the latest leg (deep zone 61.8–78.6 = OTE, best RR) · or old resistance turned support',
+            "Enter only with confirmation: reversal bar (hammer/engulfing) on 1H-4H · RSI divergence · or a break of the pullback's minor trendline — no confirmation = a BUY LIMIT at the zone is allowed but at half size only",
+            'Macro overlay before deciding direction: the old gold–REAL YIELD relationship (corr ≈ −0.82) broke down in 2022 (down to ~3-7% — central banks became the main buyers; in 2025 yields hit their highest since 2007 yet gold rose 65%) → use US10Y as a secondary, asymmetric factor: yields down = strong support for gold, but yields up = pressures gold less than it used to; never use it alone to veto the BUY side · DXY still works, corr −0.5..−0.8 · two institutional signals: ① DXY makes a new high but gold does not make a new low = bullish divergence (someone is absorbing) ② yields+DXY up but gold sideways = hidden accumulation',
+            'Magnet levels: weekly open · prev week high/low · $100 round numbers — use as TP targets and expected reaction points',
+            'Use XAGUSD to confirm the complex: silver leading higher = a healthy metals uptrend · gold rising alone with silver not following = a fragile leg',
         ],
         sets: [
             { symbol: 'XAUUSD', tf: '1h', nBars: 400 },
@@ -165,14 +165,15 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
         ttl: 900,
         news: 25,
         rrMin: 2.5,
-        horizon: 'ถือหลายสัปดาห์ถึงหลายเดือน',
-        tfRoles: '1d = จังหวะสะสม · 1w = TF สั่งการเทรนด์หลัก',
-        slGuide: 'SL ใต้โครงสร้างรายสัปดาห์ (swing low 1w · ≈1.0–1.5 × ATR14(1w)) · ทยอยเข้า 3-4 ไม้ไม่ยิงครั้งเดียว',
+        horizon: 'Hold for several weeks to several months',
+        tfRoles: '1d = accumulation timing · 1w = primary trend TF',
+        slGuide:
+            'SL below weekly structure (1w swing low · ≈1.0–1.5 × ATR14(1w)) · scale in over 3-4 entries, never all at once',
         playbook: [
-            'ทิศหลักมาจากโครงสร้าง 1W เป็นหลัก (แท่งปิดรายสัปดาห์เหนือ/ใต้ EMA20W) · ระบอบ real yield ใช้เป็นตัวประกอบรองเท่านั้น — corr เก่า −0.82 แตกตั้งแต่ 2022 เพราะธนาคารกลางซื้อสะสม (~225 ตัน/ไตรมาส) เป็นผู้ขับราคาแทน ETF flow: yields ขึ้นไม่ใช่เหตุผลขาย แต่ yields ลงยังเป็นเหตุผลซื้อ (asymmetric)',
-            'เข้าเป็นไม้ ๆ ที่ pullback รายวันลึก (Fib 50-61.8 ของขา 1W) — ไม้แรกเมื่อแตะโซน ไม้ถัดไปเมื่อมีแท่งกลับตัวรายวัน/รายสัปดาห์ยืนยัน',
-            'GDX ใช้เป็น lead indicator: เหมืองแรงกว่าทอง = สถาบันวางเดิมพันขาขึ้นต่อ · เหมืองอ่อนกว่าทองต่อเนื่อง = ขาขึ้นใกล้หมดแรง',
-            'โหมดนี้ event เดี่ยวไม่เปลี่ยนทิศ — สิ่งที่เปลี่ยนทิศคือรอบนโยบาย Fed ทั้งชุด: จุดกลับของ cycle (เริ่มลด/เริ่มขึ้นดอกเบี้ย) คือจุดทบทวน thesis ทุกครั้ง',
+            'Primary direction comes mainly from 1W structure (weekly close above/below EMA20W) · the real-yield regime is only a secondary factor — the old −0.82 corr broke down in 2022 because central-bank accumulation (~225 tonnes/quarter) replaced ETF flow as the price driver: rising yields are not a reason to sell, but falling yields are still a reason to buy (asymmetric)',
+            'Scale in on deep daily pullbacks (Fib 50-61.8 of the 1W leg) — first entry on touching the zone, next entries when a daily/weekly reversal bar confirms',
+            'Use GDX as a lead indicator: miners stronger than gold = institutions betting on further upside · miners persistently weaker than gold = the uptrend is running out of steam',
+            'In this mode a single event does not change direction — what changes it is the whole Fed policy cycle: cycle turning points (first cut/first hike) are the point to review the thesis every time',
         ],
         sets: [
             { symbol: 'XAUUSD', tf: '1d', nBars: 300 },
@@ -188,81 +189,87 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
 
 /** ข้อความ Output 5 (ตัวประกอบ) ของทอง — แยกออกมาให้โปรไฟล์ตราสารอื่นแทนที่ได้ */
 export const ANALYSIS_COMPANION_BRIEF_XAU =
-    'สรุปผลของแต่ละตัวประกอบต่อทองในโหมดนี้: DXY (สวนทาง), US10Y (สวนทางผ่าน real yield), VIX (กลัว=หนุนทอง), USDJPY (การแทรกแซง/ safe-haven flow), SPY (risk appetite), WTI (เงินเฟ้อ), BTC (คู่แข่ง hedge), XAGUSD (คอนเฟิร์มเผ่าโลหะ), GDX (เหมืองนำ/ตาม) — ตัวไหนหนุน ตัวไหนขัด สุทธิแล้วเข้าข้างฝั่งไหน';
+    'Summarize the effect of each companion on gold in this mode: DXY (inverse), US10Y (inverse via real yield), VIX (fear = supports gold), USDJPY (intervention/ safe-haven flow), SPY (risk appetite), WTI (inflation), BTC (competing hedge), XAGUSD (metals-complex confirmation), GDX (miners lead/lag) — which ones support, which conflict, and which side the net result favors';
 
 export const ANALYSIS_REQUEST = (
     spec: GoldModeSpec,
     mode: string,
     companionBrief: string = ANALYSIS_COMPANION_BRIEF_XAU,
-    assetName_th = 'ทอง',
+    assetName_th = 'gold',
 ): Array<[string, string]> => [
     ['Mode', `${mode} — ${spec.horizon} · TF: ${spec.tfRoles}`],
     [
         'Output 1 — Bias',
-        'สรุปทิศต่อ TF (ขึ้น/ลง/ข้าง) + เหตุผลจากโครงสร้างราคา EMA stack, RSI, CMF, แนวรับ-ต้าน, แท่งล่าสุด',
+        'Direction per TF (up/down/sideways) + reasoning from price structure, EMA stack, RSI, CMF, support/resistance, latest bar',
     ],
     [
         'Output 2 — Order',
-        "ต้องเลือกหนึ่งเดียวชัดเจน: BUY LIMIT @ราคา / BUY STOP @ราคา / SELL LIMIT @ราคา / SELL STOP @ราคา — หรือ NO-TRADE (ไม่ควรเล่นรอบนี้) พร้อมเหตุผล · ห้ามตอบกำกวมว่า 'ซื้อได้ขายได้'",
+        "Pick exactly one, clearly: BUY LIMIT @price / BUY STOP @price / SELL LIMIT @price / SELL STOP @price — or NO-TRADE (should not trade this round) with reasons · never give an ambiguous 'could buy or sell' answer",
     ],
     [
         'Output 3 — Levels',
-        `Entry zone + SL + TP1 + TP2 เป็นตัวเลขทั้งหมด · ${spec.slGuide} · R:R ขั้นต่ำ ${spec.rrMin}:1 — ต่ำกว่านี้ให้ตอบ NO-TRADE · จุดเข้าต้องอ้างอิง setup ใน ENTRY_PLAYBOOK ด้านล่างอย่างน้อยหนึ่งข้อ ถ้าราคาปัจจุบันไม่เข้าเกณฑ์ setup ไหนเลย = NO-TRADE รอ`,
+        `Entry zone + SL + TP1 + TP2, all as numbers · ${spec.slGuide} · minimum R:R ${spec.rrMin}:1 — below this answer NO-TRADE · the entry must reference at least one setup in the ENTRY_PLAYBOOK below; if the current price does not meet any setup = NO-TRADE, wait`,
     ],
-    ['Output 4 — Invalidation', 'เงื่อนไขที่ทำให้ setup ตาย (ราคา/เหตุการณ์) — แตะแล้วยกเลิกออเดอร์ค้างทันที'],
+    [
+        'Output 4 — Invalidation',
+        'Conditions that kill the setup (price/event) — once touched, cancel pending orders immediately',
+    ],
     ['Output 5 — Companions', companionBrief],
     [
         'Output 6 — News',
-        `ข่าวใน LATEST_FINANCIAL_NEWS ที่กระทบ${assetName_th} + เวลาข่าวใหญ่ข้างหน้า (Fed/CPI/jobs) — ถ้ามี event ใหญ่ภายใน horizon ให้ลดขนาดหรือ NO-TRADE`,
+        `News in LATEST_FINANCIAL_NEWS affecting ${assetName_th} + timing of upcoming major news (Fed/CPI/jobs) — if a major event falls within the horizon, reduce size or NO-TRADE`,
     ],
     [
         'Output 7 — Size & Confidence',
-        'ขนาดไม้แนะนำ (เต็ม/ครึ่ง/หนึ่งในสี่) ตาม ATR และ confidence 0-10 พร้อมเหตุผลบรรทัดเดียว',
+        'Recommended size (full/half/quarter) based on ATR, and confidence 0-10, with a one-line reason',
     ],
     [
         'Output 8 — Summary',
-        'สรุปเป็นภาษาคน 3-5 บรรทัด: เล่นหรือไม่เล่น เพราะอะไร แผน A (ตามคำสั่งหลัก) และแผน B (ถ้าราคาวิ่งอีกทาง)',
+        'Plain-language summary in 3-5 lines: trade or not and why, plan A (the main order) and plan B (if price moves the other way)',
     ],
 ];
 
 export const SESSION_MAP: Array<[string, string]> = [
-    ['Asia', '06:00–14:00 ไทย (19:00–03:00 ET) — เงียบ สร้างกรอบวัน (Asian range) ใช้เป็นโครงให้ London เล่น'],
-    ['London open', '14:00 ไทย (03:00 ET) — แรงขยับแรกของวัน มัก break/reject กรอบเอเชีย'],
+    [
+        'Asia',
+        '06:00–14:00 BKK (19:00–03:00 ET) — quiet, builds the day range (Asian range) used as the framework for London',
+    ],
+    ['London open', '14:00 BKK (03:00 ET) — first real move of the day, often breaks/rejects the Asian range'],
     [
         'London–NY overlap',
-        '19:00–23:00 ไทย (08:00–12:00 ET) — volume+volatility สูงสุดของวัน · ช่วงทำเงินหลักของ scalp/intraday',
+        '19:00–23:00 BKK (08:00–12:00 ET) — highest volume+volatility of the day · main money-making window for scalp/intraday',
     ],
     [
         'US data',
-        '19:30 ไทย (08:30 ET) = NFP (ศุกร์แรกของเดือน)/CPI/jobless — timestamp ผันผวนสุดของสัปดาห์ · FOMC 01:00 ไทย (14:00 ET)',
+        '19:30 BKK (08:30 ET) = NFP (first Friday of the month)/CPI/jobless — the most volatile timestamp of the week · FOMC 01:00 BKK (14:00 ET)',
     ],
-    ['Dead zone', 'หลังปิด NY 04:00-05:00 ไทย + ก่อนเอเชียตื่น — spread กว้าง SL โดนกวาดง่าย งดเทรด'],
-    ['Daily range', 'ทองขยับ $20–50+/วันเป็นปกติ — วางเป้า/SL ให้สมส่วนกับ range จริง ไม่ใช่ความหวัง'],
+    ['Dead zone', 'After NY close 04:00-05:00 BKK + before Asia wakes up — wide spreads, SL easily swept, no trading'],
+    ['Daily range', 'Gold normally moves $20–50+/day — size targets/SL in proportion to the real range, not hope'],
 ];
 
 export const READING_GUIDE = (priceSource: string): Array<[string, string]> => [
     [
         'Order Semantics',
-        'BUY LIMIT = ตั้งซื้อต่ำกว่าราคาปัจจุบัน (รอย่อ) · BUY STOP = ตั้งซื้อเหนือราคาปัจจุบัน (รอทะลุ) · SELL LIMIT = ตั้งขายเหนือราคาปัจจุบัน (รอเด้ง) · SELL STOP = ตั้งขายต่ำกว่าราคาปัจจุบัน (รอหลุด)',
+        'BUY LIMIT = buy below the current price (wait for a dip) · BUY STOP = buy above the current price (wait for a breakout) · SELL LIMIT = sell above the current price (wait for a bounce) · SELL STOP = sell below the current price (wait for a breakdown)',
     ],
     [
         'Volume Caveat',
-        'Volume ทุกไฟล์ = tick volume ของ CFD/FX — CMF/OBV/RVOL ใช้เปรียบเทียบ relative เท่านั้น อย่าตีความเป็นเงินสถาบันแบบหุ้น',
+        'Volume in every file = tick volume of CFD/FX — CMF/OBV/RVOL are for relative comparison only, do not read them as institutional money like in equities',
     ],
     [
         'Multi-TF Rule',
-        'TF ใหญ่บอกทิศ TF เล็กบอกจังหวะ — ถ้าขัดกันให้ลดขนาดหรือ NO-TRADE · สัญญาณจากแท่งที่ยังไม่ปิด (Is_Closed_Bar=False) ห้ามใช้ยืนยัน',
+        'Higher TF gives direction, lower TF gives timing — if they conflict, reduce size or NO-TRADE · never use signals from unclosed bars (Is_Closed_Bar=False) as confirmation',
     ],
     [
         'Correlation Playbook',
-        'ทองแพ้เมื่อ: DXY แข็ง + real yield ขึ้น + risk-on เต็มตัว · ทองชนะเมื่อ: ดอลลาร์อ่อน + yields ลง + ความกลัว (VIX ขึ้น) หรือเงินเฟ้อเร่ง (WTI ขึ้นแรง) · การแทรกแซงเยน (ขาย USD) มักหนุนทองระยะสั้น',
+        'Gold loses when: DXY strong + real yield up + full risk-on · gold wins when: weak dollar + yields down + fear (VIX up) or accelerating inflation (WTI up sharply) · yen intervention (selling USD) usually supports gold short term',
     ],
     [
         'Session',
-        'ตลาดโลหะเปิด ~23 ชม./วัน ปิด 17:00-18:00 ET และสุดสัปดาห์ · สภาพคล่องบางสุดช่วงหลังปิด NY ถึงเปิด Asia — spread กว้าง ระวัง SL โดนกวาด',
+        'Metals market open ~23 h/day, closed 17:00-18:00 ET and weekends · liquidity is thinnest from NY close to Asia open — wide spreads, beware of SL getting swept',
     ],
     [
         'Spread Note',
-        `ราคา XAUUSD มาจาก ${priceSource} — เป็น feed เดียวกับบัญชีที่ยิงออเดอร์จริง ตั้งระดับด้วยข้อมูลชุดนี้เสมอ อย่าผสมราคาจากแหล่งอื่น · ตัวประกอบมาจาก Yahoo Finance (ต่างแหล่งได้ ใช้ดูทิศเท่านั้น)`,
+        `XAUUSD prices come from ${priceSource} — the same feed as the account that executes real orders; always set levels from this data set, never mix in prices from other sources · companions come from Yahoo Finance (may differ by source, use for direction only)`,
     ],
 ];

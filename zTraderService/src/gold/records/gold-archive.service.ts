@@ -142,7 +142,7 @@ export class GoldArchiveService {
         return {
             ...summary,
             series_tail_omitted: series_tail
-                ? `${Object.keys(series_tail).length} series (เพิ่ม ?full=1 เพื่อดูแท่งย้อนหลัง)`
+                ? `${Object.keys(series_tail).length} series (add ?full=1 to see historical bars)`
                 : undefined,
         };
     }

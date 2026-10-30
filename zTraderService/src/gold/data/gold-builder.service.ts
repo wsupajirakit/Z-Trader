@@ -94,7 +94,7 @@ export class GoldBuilderService {
     }
 
     private errText(e: any): string {
-        if (e == null) return 'ไม่ทราบสาเหตุ';
+        if (e == null) return 'unknown cause';
         if (typeof e === 'string') return e;
         if (errorMessage(e)) return String(errorMessage(e));
         if (e.errorCode || e.description) {
@@ -235,7 +235,7 @@ export class GoldBuilderService {
         }
 
         const raw = (res?.trendbar ?? []) as any[];
-        if (!raw.length) throw new Error(`cTrader trendbars ${tf} ไม่สำเร็จหลัง retry: ${this.errText(lastErr)}`);
+        if (!raw.length) throw new Error(`cTrader trendbars ${tf} failed after retries: ${this.errText(lastErr)}`);
 
         const num = (v: any) => (typeof v === 'number' ? v : Number(v?.toString?.() ?? v ?? 0));
         const bars: Bar[] = raw
@@ -339,13 +339,13 @@ export class GoldBuilderService {
         // session_note ตามชนิดตราสาร — ข้อความโลหะต้องเหมือนเดิมทุกตัวอักษร (regression ทอง)
         const sessionNote =
             profile.kind === 'fx'
-                ? '# session_note: forex 24h/5 วัน (อาทิตย์ 17:05 ET → ศุกร์ 16:55 ET · ไม่มีพักรายวัน แต่ spread ถ่างช่วง rollover 17:00 ET) — แท่งสุดท้ายอาจยังไม่ปิด (ดูคอลัมน์ Is_Closed_Bar)'
-                : '# session_note: metals ~23h/day (ปิด 17:00-18:00 ET + สุดสัปดาห์) — แท่งสุดท้ายอาจยังไม่ปิด (ดูคอลัมน์ Is_Closed_Bar)';
+                ? '# session_note: forex 24h/5 days (Sun 17:05 ET → Fri 16:55 ET · no daily break, but spread widens around the 17:00 ET rollover) — the last bar may not be closed yet (see the Is_Closed_Bar column)'
+                : '# session_note: metals ~23h/day (closed 17:00-18:00 ET + weekends) — the last bar may not be closed yet (see the Is_Closed_Bar column)';
         return [
             `# gold_mode: ${mode} | symbol: ${symbol} | tf: ${tf} | exchange: ${source}`,
             `# generated_utc: ${now.toISOString().slice(0, 19)}Z | et: ${fmtTz('America/New_York')} | bangkok: ${fmtTz('Asia/Bangkok')}`,
             `# last_bar_start: ${this.fmtDt(lastTs)} (UTC)`,
-            '# volume_note: CFD/FX volume = TICK VOLUME (proxy) — CMF/OBV/RVOL อ่านเชิงเปรียบเทียบ ไม่ใช่เงินสถาบันแบบหุ้น',
+            '# volume_note: CFD/FX volume = TICK VOLUME (proxy) — CMF/OBV/RVOL are relative readings only, not institutional money flow as in equities',
             sessionNote,
         ];
     }
@@ -444,7 +444,7 @@ export class GoldBuilderService {
         const lines: string[] = [this.csvRow(['Section', 'Key', 'Field', 'Value'])];
 
         // คำเรียกตราสารใน Output 6 — ทองใช้ 'ทอง' (ค่า default เดิม) · คู่เงินใช้ชื่อคู่ตรง ๆ
-        const assetName_th = profile.key === 'XAUUSD' ? 'ทอง' : profile.key;
+        const assetName_th = profile.key === 'XAUUSD' ? 'gold' : profile.key;
         for (const [key, val] of ANALYSIS_REQUEST(spec, mode, profile.companionBrief_th, assetName_th)) {
             lines.push(this.csvRow(['ANALYSIS_REQUEST', '', key, val]));
         }
@@ -454,7 +454,7 @@ export class GoldBuilderService {
         for (const [key, val] of profile.sessionMap) {
             lines.push(this.csvRow(['SESSION_MAP', '', key, val]));
         }
-        for (const [key, val] of profile.readingGuide('ICMARKETS ผ่าน cTrader Open API')) {
+        for (const [key, val] of profile.readingGuide('ICMARKETS via cTrader Open API')) {
             lines.push(this.csvRow(['READING_GUIDE', '', key, val]));
         }
         if (withNews) {

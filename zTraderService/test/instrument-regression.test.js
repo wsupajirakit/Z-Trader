@@ -64,9 +64,15 @@ function normalizeDecision(d) {
     if (!d) return d;
     const c = { ...d };
     // บรรทัดแรกของ summary เป็น text change ที่อนุญาต (เพิ่มชื่อตราสาร) — ตัดทิ้งก่อนเทียบ
-    if (typeof c.analysis_summary_th === 'string') {
-        c.analysis_summary_th = c.analysis_summary_th.split('\n').filter((l) => !l.startsWith('โหมด ')).join('\n');
+    if (typeof c.analysis_summary === 'string') {
+        c.analysis_summary = c.analysis_summary.split('\n').filter((l) => !l.startsWith('โหมด ') && !l.startsWith('Mode ')).join('\n');
     }
+    // ข้อความ (reason/summary/invalidation) ถูกแปลเป็นภาษาอังกฤษแล้ว ส่วน baseline ยังเป็นภาษาไทย
+    // → เทียบไม่ได้ตรงตัว ตัดทิ้งก่อนเทียบ (ฟิลด์เงินจริง/ตัวเลขทั้งหมดยังเทียบเป๊ะเหมือนเดิม)
+    delete c.reason;
+    delete c.analysis_summary;
+    delete c.analysis_summary_th;
+    delete c.invalidation;
     delete c.ai_assist;
     // near_miss/near_miss_rule เป็น "ป้ายกำกับ" ที่เพิ่มเข้ามาใหม่ (ประตู AI) — ไม่ใช่ผลการเทรด
     // ตัดออกก่อนเทียบ แล้วไปตรวจแยกด้านล่างว่าเป็นการ "เพิ่มข้อมูล" ไม่ใช่ "เปลี่ยนคำตัดสิน"
@@ -290,8 +296,8 @@ t(`sessionGuard identical (${sgRuns} checks)`, sgMismatch === 0, `${sgMismatch}`
 // ข้อที่ต้องคงเดิม: ไม่มี ai = ผลเท่า TA เป๊ะ · VETO = ไม่เข้า
 {
     const a = fakeAuto(OLD.Auto), b = fakeAuto(NEW.Auto);
-    const TA = { order_type: 'SELL_LIMIT', entry: 4000, sl: 4020, tp1: 3960, tp2: 3940, rr_tp1: 2, confidence: 7, size: 'full', reason: 'x', playbook_ref: 'swing #1', invalidation: '', valid_until_utc: null, analysis_summary_th: '' };
-    const ai = (o) => ({ verdict: 'ADJUST', entry: null, sl: null, tp1: null, tp2: null, size: 'full', confidence: null, key_levels: '', risk_note_th: '', reason_th: 'r', ...o });
+    const TA = { order_type: 'SELL_LIMIT', entry: 4000, sl: 4020, tp1: 3960, tp2: 3940, rr_tp1: 2, confidence: 7, size: 'full', reason: 'x', playbook_ref: 'swing #1', invalidation: '', valid_until_utc: null, analysis_summary: '' };
+    const ai = (o) => ({ verdict: 'ADJUST', entry: null, sl: null, tp1: null, tp2: null, size: 'full', confidence: null, key_levels: '', risk_note: '', reason: 'r', ...o });
 
     // 1) ไม่มี AI = ต้องเท่าของเดิมเป๊ะ (ทางที่บอทเดินอยู่ทุกวันนี้ เพราะยังไม่มี GEMINI_API_KEY)
     t('applyAssist: ไม่มี ai → ผลเท่า baseline เป๊ะ',

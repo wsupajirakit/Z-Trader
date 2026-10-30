@@ -57,9 +57,9 @@ describe('socket.io', () => {
 
         const logged = once(socket, 'log');
         const ordered = once(socket, 'orderLog');
-        tradeFeed.emit('entry', { message: '[คิด] thinking', type: 'info' });
+        tradeFeed.emit('entry', { message: '[Think] thinking', type: 'info' });
         tradeFeed.emit('entry', { message: 'Trade executed successfully [BUY XAUUSD]', type: 'info' });
-        assert.deepEqual((await logged)[0], { message: '[คิด] thinking', type: 'info' });
+        assert.deepEqual((await logged)[0], { message: '[Think] thinking', type: 'info' });
         assert.equal((await ordered)[0].type, 'success');
     });
 

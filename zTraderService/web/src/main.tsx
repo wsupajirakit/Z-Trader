@@ -4,7 +4,6 @@ import { App } from './app/App';
 import { createQueryClient } from './app/queryClient';
 import { createAppRouter } from './app/router';
 import { installSessionHandlers } from './app/sessionHandlers';
-import './styles/index.css';
 
 const queryClient = createQueryClient();
 const router = createAppRouter({ queryClient });

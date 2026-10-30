@@ -6,6 +6,7 @@ import { loadSession, originGuard } from '../auth/middleware.js';
 import { log } from '../logging/logger.js';
 import { authRoutes } from './routes/auth.js';
 import { goldRoutes } from './routes/gold.js';
+import { machineRoutes } from './routes/machine.js';
 
 const PUBLIC_DIR = fileURLToPath(new URL('../../public/', import.meta.url));
 
@@ -13,15 +14,28 @@ const PUBLIC_DIR = fileURLToPath(new URL('../../public/', import.meta.url));
  * Builds the Express app. No side effects beyond the returned app.
  *
  * @param {{
- *   config: { trustProxy: number },
+ *   config: { trustProxy: number, service: { apiKey: string } },
  *   api: import('../services/ServiceClient.js').ServiceClient,
  *   sessions: import('../auth/SessionStore.js').SessionStore,
  *   revalidator: import('../auth/SessionRevalidator.js').SessionRevalidator,
  *   verifier: import('../auth/CredentialVerifier.js').CredentialVerifier,
  *   loginRateLimit: { windowMs: number, limit: number },
+ *   engine: Parameters<typeof machineRoutes>[0]['engine'],
+ *   logBuffer: import('../logging/LogBuffer.js').LogBuffer,
+ *   machineRateLimit?: { windowMs: number, limit: number },
  * }} deps
  */
-export function createApp({ config, api, sessions, revalidator, verifier, loginRateLimit }) {
+export function createApp({
+    config,
+    api,
+    sessions,
+    revalidator,
+    verifier,
+    loginRateLimit,
+    engine,
+    logBuffer,
+    machineRateLimit,
+}) {
     const app = express();
     // Number of reverse-proxy hops in front of us (Coolify/Traefik = 1). 0 = ignore X-Forwarded-*.
     app.set('trust proxy', config.trustProxy > 0 ? config.trustProxy : false);
@@ -57,6 +71,12 @@ export function createApp({ config, api, sessions, revalidator, verifier, loginR
         next();
     });
     app.use(express.json({ limit: '32kb' }));
+    // Server-to-server (x-api-key only). Mounted before the browser origin guard and session loader:
+    // these routes never look at cookies, so there is nothing for CSRF to protect.
+    app.use(
+        '/api/machine',
+        machineRoutes({ apiKey: config.service.apiKey, engine, logBuffer, rateLimit: machineRateLimit }),
+    );
     app.use(originGuard(config.trustProxy));
     app.use(loadSession(sessions, revalidator, config.trustProxy));
 

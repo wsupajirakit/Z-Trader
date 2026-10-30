@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { tradeLog } from '../logging/logger.js';
+import { STRATEGY_MODES } from '../strategies/modes.js';
 
 /**
  * The Sonic/Scalper polling loop that used to live in index.js. Behaviour is unchanged:
@@ -37,7 +38,7 @@ export class TradingEngine extends EventEmitter {
     init() {
         this.heartbeat = setInterval(() => {
             if (this.state.isRunning) {
-                tradeLog.info('[ทำ] Monitoring market conditions... (Syncing)');
+                tradeLog.info('[Exec] Monitoring market conditions... (Syncing)');
             }
         }, 30000); // Every 30s to avoid too much noise but show life
 
@@ -50,6 +51,35 @@ export class TradingEngine extends EventEmitter {
 
     getState() {
         return { isRunning: this.state.isRunning, symbols: this.state.symbols, mode: this.state.mode };
+    }
+
+    /**
+     * Everything a polling dashboard needs in one read: the state, the limits, the valid modes and
+     * the latest indicator values per configured symbol. Values that were never received are null.
+     */
+    getSnapshot() {
+        const { state } = this;
+        const orNull = (v) => {
+            const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+            return typeof n === 'number' && Number.isFinite(n) ? n : null;
+        };
+        return {
+            ...this.getState(),
+            symbols: [...state.symbols],
+            maxPositions: state.maxPositions,
+            modes: [...STRATEGY_MODES],
+            symbolsLive: state.symbols.map((symbol) => {
+                const live = state.liveStatusMap.get(symbol) ?? {};
+                return {
+                    symbol,
+                    price: orNull(live.price),
+                    rsi: orNull(live.rsi),
+                    ema: orNull(live.ema),
+                    lastUpdate: live.lastUpdate ? new Date(live.lastUpdate).toISOString() : null,
+                    hasReceived: live.hasReceived === true,
+                };
+            }),
+        };
     }
 
     onIndicators(payload) {
@@ -93,7 +123,7 @@ export class TradingEngine extends EventEmitter {
      */
     start(symbols, mode) {
         const { state } = this;
-        tradeLog.info(`[ทำ] Starting Trading: ${symbols.join(', ')} Mode: ${mode}`);
+        tradeLog.info(`[Exec] Starting Trading: ${symbols.join(', ')} Mode: ${mode}`);
 
         state.symbols = symbols;
         state.mode = mode;
@@ -117,7 +147,7 @@ export class TradingEngine extends EventEmitter {
     }
 
     stop() {
-        tradeLog.info('[ทำ] Stopping Trading Loop');
+        tradeLog.info('[Exec] Stopping Trading Loop');
         this.state.isRunning = false;
         if (this.loopInterval) clearInterval(this.loopInterval);
         this.loopInterval = null;

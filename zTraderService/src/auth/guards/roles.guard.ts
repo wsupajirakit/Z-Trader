@@ -17,7 +17,7 @@ export class RolesGuard implements CanActivate {
         if (!required) return true;
         const p = principalOf(ctx.switchToHttp().getRequest<Request>());
         if (p?.kind !== 'session' || !hasRole(p.user.role, required)) {
-            throw new ForbiddenException('สิทธิ์ไม่พอสำหรับการทำรายการนี้');
+            throw new ForbiddenException('Insufficient permissions for this action');
         }
         return true;
     }

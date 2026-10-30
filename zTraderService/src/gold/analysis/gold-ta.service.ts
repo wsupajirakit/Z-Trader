@@ -84,38 +84,38 @@ export interface NearMissRule {
 export const NEAR_MISS_RULES: NearMissRule[] = [
     {
         id: 'await-confirm-bar',
-        why_th: 'ราคาทะลุกรอบแล้วแต่แท่งยังไม่ปิด — TA รอยืนยันตามวินัย แต่โครงสร้างอาจชัดพอแล้ว (เจอบ่อยสุด 140 รอบ)',
-        match: /ยังไม่มีแท่ง .* ปิดนอกกรอบ|รอ break ที่ยืนยันด้วยแท่งปิด/,
+        why_th: 'Price has broken the range but the bar has not closed — TA waits for confirmation per discipline, but the structure may already be clear enough (most frequent: 140 rounds)',
+        match: /No .* bar has closed outside|wait for a break confirmed by a closed bar/,
     },
     {
         id: 'sl-slightly-wide',
-        why_th: 'SL ตามโครงสร้างกว้างเกินเพดาน ATR นิดเดียว — AI อาจหาจุดวาง SL ที่แคบกว่าโดยยังเกาะโครงสร้าง (43 รอบ)',
-        match: /SL โครงสร้างกว้าง [\d.]+×ATR/,
+        why_th: 'Structural SL is only slightly wider than the ATR cap — AI may find a tighter SL placement that still respects structure (43 rounds)',
+        match: /Structural SL too wide [\d.]+×ATR/,
     },
     {
         id: 'await-reversal-bar',
-        why_th: 'ราคาอยู่ในโซน pullback แล้วแต่ยังไม่มีแท่งกลับตัว — จังหวะที่ AI อ่านบริบทได้ดีกว่ากฎแข็ง (14 รอบ)',
-        match: /อยู่ในโซน pullback แต่ยังไม่มีแท่งกลับตัว/,
+        why_th: 'Price is already in the pullback zone but there is no reversal bar yet — a spot where AI reads context better than hard rules (14 rounds)',
+        match: /in the pullback zone but no reversal bar/,
     },
     {
         id: 'tf-regime-conflict',
-        why_th: 'TF ขัดกันเอง (4H ขึ้น แต่ใต้ EMA200 รายวัน) — งานวิจัยชี้ว่า "indicator disagreement" คือจังหวะที่ LLM มีประโยชน์สุด (12 รอบ)',
-        match: /ขัดกับ regime 1d|ทิศ 1H ขัด/,
+        why_th: 'TFs disagree (4H up but below the daily EMA200) — research suggests "indicator disagreement" is where an LLM helps most (12 rounds)',
+        match: /conflicts with the 1d regime|1H direction conflicts/,
     },
     {
         id: 'rr-just-below',
-        why_th: 'R:R ขาดไปนิดเดียวหลังหลบเลขกลม — AI อาจหา TP ที่สมจริงกว่าโดยไม่ทับแม่เหล็กราคา (15 รอบ)',
-        match: /R:R [\d.]+ < เกณฑ์|ให้ R:R [\d.]+ </,
+        why_th: 'R:R falls just short after avoiding round numbers — AI may find a more realistic TP that does not sit on a price magnet (15 rounds)',
+        match: /R:R [\d.]+ < threshold|gives R:R [\d.]+ </,
     },
     {
         id: 'rvol-just-below',
-        why_th: 'RVOL ต่ำกว่าเกณฑ์แค่ปัดเศษ (เจอจริง 0.99 / 1.04 / 1.08 / 1.18 เทียบเกณฑ์ 1.2) — เส้นแบ่งแข็งเกินไป (11 รอบ)',
+        why_th: 'RVOL below threshold only by a rounding margin (real cases 0.99 / 1.04 / 1.08 / 1.18 vs threshold 1.2) — the cutoff is too rigid (11 rounds)',
         match: /RVOL [\d.]+ < [\d.]+/,
     },
     {
         id: 'past-zone',
-        why_th: 'ราคาเลยโซน pullback ไปแล้วแต่ยังไม่ไกลมาก — AI อาจเห็น leg ใหม่ที่กฎยังไม่รับรู้',
-        match: /ราคาเลยโซน pullback ไปแล้ว/,
+        why_th: 'Price is past the pullback zone but not far — AI may see a new leg the rules do not recognize yet',
+        match: /Price already past the pullback zone/,
     },
 ];
 
@@ -182,7 +182,7 @@ export class GoldTaService {
             const aligned = ctx.compScore * dir;
             if (aligned <= -2) {
                 return this.noTrade(
-                    `setup ${d.playbook_ref} ผ่าน แต่ตัวประกอบขัดแรง (score ${ctx.compScore}): ${ctx.compNotes.join(' · ')}`,
+                    `setup ${d.playbook_ref} passed but companions strongly disagree (score ${ctx.compScore}): ${ctx.compNotes.join(' · ')}`,
                 );
             }
             if (aligned >= 1) d.confidence = Math.min(10, d.confidence + 1);
@@ -192,7 +192,7 @@ export class GoldTaService {
             }
             if (opts.sizeCap === 'half' && d.size === 'full') d.size = 'half';
             if (opts.sizeCap === 'quarter') d.size = 'quarter';
-            d.analysis_summary_th = this.summary(ctx, d);
+            d.analysis_summary = this.summary(ctx, d);
         }
         return d;
     }
@@ -203,7 +203,7 @@ export class GoldTaService {
         const h4 = this.closed(ctx, seriesKey(ctx.p, '4h'));
         const d1 = this.closed(ctx, seriesKey(ctx.p, '1d'));
         const h1 = this.closed(ctx, seriesKey(ctx.p, '1h'));
-        if (h4.length < 220 || d1.length < 30 || h1.length < 30) return this.noTrade('ข้อมูล 4h/1d/1h ไม่พอ');
+        if (h4.length < 220 || d1.length < 30 || h1.length < 30) return this.noTrade('Not enough 4h/1d/1h data');
 
         const L4 = h4[h4.length - 1];
         const LD = d1[d1.length - 1];
@@ -211,14 +211,14 @@ export class GoldTaService {
         const atrD = LD.atr14;
         if (!this.ema200Ready(h4) || !this.ema200Ready(d1)) {
             return this.noTrade(
-                `ข้อมูลไม่พอให้ EMA200 อุ่นตัว (4h ${h4.length} แท่ง · 1d ${d1.length} แท่ง ต้อง >= 250) ` +
-                    '— ทิศ/regime เชื่อไม่ได้ ไม่เทรดรอบนี้',
+                `Not enough data to warm up EMA200 (4h ${h4.length} bars · 1d ${d1.length} bars, need >= 250) ` +
+                    '— direction/regime unreliable, no trade this round',
             );
         }
         const bull = L4.ema50 > L4.ema200;
         const dir = bull ? 1 : -1;
         ctx.notes.push(
-            `4H trend: EMA50 ${this.f(ctx, L4.ema50)} ${bull ? '>' : '<'} EMA200 ${this.f(ctx, L4.ema200)} → ${bull ? 'ขาขึ้น เล่นฝั่ง BUY' : 'ขาลง เล่นฝั่ง SELL'} (playbook swing #1)`,
+            `4H trend: EMA50 ${this.f(ctx, L4.ema50)} ${bull ? '>' : '<'} EMA200 ${this.f(ctx, L4.ema200)} → ${bull ? 'uptrend, play the BUY side' : 'downtrend, play the SELL side'} (playbook swing #1)`,
         );
 
         // regime filter (research: 200-day MA เป็น regime filter ที่มีหลักฐานแน่นสุด
@@ -226,13 +226,13 @@ export class GoldTaService {
         const regimeBull = LD.close > LD.ema200;
         if (regimeBull !== bull) {
             return this.noTrade(
-                `ทิศ 4H (${bull ? 'ขึ้น' : 'ลง'}) ขัดกับ regime 1d (ราคา${regimeBull ? 'เหนือ' : 'ใต้'} EMA200(1d) ${this.f(ctx, LD.ema200)}) — ช่วงเปลี่ยนผ่าน ไม่เทรด`,
+                `4H direction (${bull ? 'up' : 'down'}) conflicts with the 1d regime (price ${regimeBull ? 'above' : 'below'} EMA200(1d) ${this.f(ctx, LD.ema200)}) — transition phase, no trade`,
             );
         }
 
         // last impulse leg on 4H in trend direction
         const leg = this.lastLeg(h4, bull, 4);
-        if (!leg) return this.noTrade(`ไม่พบ swing leg ทิศ${bull ? 'ขึ้น' : 'ลง'}บน 4H ที่ชัดพอ — รอโครงสร้าง`);
+        if (!leg) return this.noTrade(`No clear ${bull ? 'up' : 'down'} swing leg on 4H — wait for structure`);
         const legLo = leg.lo.price,
             legHi = leg.hi.price;
         const fib = (r: number) => (bull ? legHi - (legHi - legLo) * r : legLo + (legHi - legLo) * r);
@@ -259,19 +259,22 @@ export class GoldTaService {
             if (!confirm) {
                 sizeBase = 'half';
                 playbook = 'swing #2';
-                ctx.notes.push('ยังไม่มีแท่งยืนยัน → ตั้ง LIMIT ที่โซนขนาดครึ่งไม้ (playbook swing #2)');
+                ctx.notes.push('No confirmation bar yet → place a half-size LIMIT at the zone (playbook swing #2)');
             }
         } else if (distToZone > -0.6 * atrD) {
             // already inside the zone — need confirmation, enter on break of confirm bar
-            if (!confirm) return this.noTrade('ราคาอยู่ในโซน pullback แต่ยังไม่มีแท่งกลับตัวยืนยัน (swing #2) — รอ');
+            if (!confirm)
+                return this.noTrade(
+                    'Price is in the pullback zone but no reversal bar has confirmed yet (swing #2) — wait',
+                );
             const c = h1[h1.length - 1];
             orderType = bull ? 'BUY_STOP' : 'SELL_STOP';
             entry = this.avoidRound(ctx, bull ? c.high + 0.1 * c.atr14 : c.low - 0.1 * c.atr14, dir);
             playbook = 'swing #2';
-            ctx.notes.push(`มีแท่งยืนยัน (${confirm}) ในโซน → ${orderType} เหนือ/ใต้แท่งยืนยัน`);
+            ctx.notes.push(`Confirmation bar (${confirm}) in the zone → ${orderType} above/below the confirmation bar`);
         } else {
             return this.noTrade(
-                `ราคาเลยโซน pullback ไปแล้ว ${this.f(ctx, Math.abs(distToZone))} (${(Math.abs(distToZone) / atrD).toFixed(1)}×ATR) — โครงสร้างเสีย รอ leg ใหม่`,
+                `Price already past the pullback zone by ${this.f(ctx, Math.abs(distToZone))} (${(Math.abs(distToZone) / atrD).toFixed(1)}×ATR) — structure broken, wait for a new leg`,
             );
         }
 
@@ -284,11 +287,11 @@ export class GoldTaService {
         if (risk < 0.6 * atrD) {
             sl = entry - dir * atrD;
             risk = atrD;
-            ctx.notes.push('SL โครงสร้างแคบไป → ขยายเป็น 1.0×ATR(1d)');
+            ctx.notes.push('Structural SL too tight → widened to 1.0×ATR(1d)');
         }
         if (risk > 1.8 * atrD)
             return this.noTrade(
-                `SL โครงสร้างกว้าง ${(risk / atrD).toFixed(1)}×ATR(1d) เกินเกณฑ์ 1.5 — ไม้นี้ risk ไม่คุ้ม`,
+                `Structural SL too wide ${(risk / atrD).toFixed(1)}×ATR(1d), above the 1.5 limit — risk not worth it on this trade`,
             );
 
         return this.buildLevels(ctx, {
@@ -313,7 +316,7 @@ export class GoldTaService {
     private analyzePosition(ctx: Ctx): GoldDecision {
         const w1 = this.closed(ctx, seriesKey(ctx.p, '1w'));
         const d1 = this.closed(ctx, seriesKey(ctx.p, '1d'));
-        if (w1.length < 30 || d1.length < 30) return this.noTrade('ข้อมูล 1w/1d ไม่พอ');
+        if (w1.length < 30 || d1.length < 30) return this.noTrade('Not enough 1w/1d data');
 
         const LW = w1[w1.length - 1];
         const price = this.livePrice(ctx, [seriesKey(ctx.p, '1d'), seriesKey(ctx.p, '1w')]);
@@ -321,11 +324,11 @@ export class GoldTaService {
         const dir = bull ? 1 : -1;
         const atrW = LW.atr14;
         ctx.notes.push(
-            `1W close ${this.f(ctx, LW.close)} ${bull ? '>' : '<'} EMA20W ${this.f(ctx, LW.ema20)} → ระบอบ${bull ? 'ขาขึ้น' : 'ขาลง'} (playbook position #1)`,
+            `1W close ${this.f(ctx, LW.close)} ${bull ? '>' : '<'} EMA20W ${this.f(ctx, LW.ema20)} → ${bull ? 'bullish' : 'bearish'} regime (playbook position #1)`,
         );
 
         const leg = this.lastLeg(w1, bull, 2);
-        if (!leg) return this.noTrade('ไม่พบ leg รายสัปดาห์ที่ชัด — รอโครงสร้าง');
+        if (!leg) return this.noTrade('No clear weekly leg — wait for structure');
         const fib = (r: number) =>
             bull ? leg.hi.price - (leg.hi.price - leg.lo.price) * r : leg.lo.price + (leg.hi.price - leg.lo.price) * r;
 
@@ -336,7 +339,7 @@ export class GoldTaService {
             const confirm = this.reversalConfirmation(d1, bull);
             if (!confirm)
                 return this.noTrade(
-                    'ราคาอยู่ใน/เลยโซน Fib50 รายสัปดาห์ แต่ยังไม่มีแท่งกลับตัวรายวัน (position #2) — รอ',
+                    'Price is in/beyond the weekly Fib50 zone but no daily reversal bar yet (position #2) — wait',
                 );
             const c = d1[d1.length - 1];
             const e2 = this.avoidRound(ctx, bull ? c.high + 0.1 * c.atr14 : c.low - 0.1 * c.atr14, dir);
@@ -382,22 +385,27 @@ export class GoldTaService {
     private analyzeIntraday(ctx: Ctx): GoldDecision {
         const m15 = this.closed(ctx, seriesKey(ctx.p, '15m'));
         const h1 = this.closed(ctx, seriesKey(ctx.p, '1h'));
-        if (m15.length < 60 || h1.length < 60) return this.noTrade('ข้อมูล 15m/1h ไม่พอ');
+        if (m15.length < 60 || h1.length < 60) return this.noTrade('Not enough 15m/1h data');
 
         const now = Date.now();
         const range = this.asianRange(m15, now);
-        if (!range) return this.noTrade('กรอบเอเชียวันนี้ยังไม่ครบ (ก่อน 14:00 ไทย) — รอ London (intraday #1)');
+        if (!range)
+            return this.noTrade(
+                'Asian range for today is not complete yet (before 14:00 BKK) — wait for London (intraday #1)',
+            );
         const { hi: rH, lo: rL } = range;
         const width = rH - rL;
         const L1 = h1[h1.length - 1];
         const atrH = L1.atr14;
         const price = this.livePrice(ctx, [seriesKey(ctx.p, '15m'), seriesKey(ctx.p, '1h')]);
         ctx.notes.push(
-            `Asian range ${this.f(ctx, rL)}–${this.f(ctx, rH)} (กว้าง ${this.f(ctx, width)}) · 1H EMA20 ${this.f(ctx, L1.ema20)} vs EMA50 ${this.f(ctx, L1.ema50)}`,
+            `Asian range ${this.f(ctx, rL)}–${this.f(ctx, rH)} (width ${this.f(ctx, width)}) · 1H EMA20 ${this.f(ctx, L1.ema20)} vs EMA50 ${this.f(ctx, L1.ema50)}`,
         );
 
         if (width < 0.5 * atrH)
-            return this.noTrade(`กรอบเอเชียแคบผิดปกติ (${this.f(ctx, width)} < 0.5×ATR1h) — breakout เชื่อไม่ได้`);
+            return this.noTrade(
+                `Asian range abnormally narrow (${this.f(ctx, width)} < 0.5×ATR1h) — breakout unreliable`,
+            );
         const bull = L1.ema20 > L1.ema50;
 
         // SL: post-mortem 2026-08-04 โดนกวาดที่ 1.2×ATR — งานอ้างอิงส่วนใหญ่ให้วาง
@@ -418,11 +426,11 @@ export class GoldTaService {
         if (!brokeUpBar && !brokeDnBar) {
             if (confirmBarUp || confirmBarDn) {
                 return this.noTrade(
-                    `มีแท่งปิดนอกกรอบแต่ RVOL ${(confirmBarUp ?? confirmBarDn)!.rvol20.toFixed(2)} < 1.2 — break ไร้แรง volume ไม่หนุน (ORB evidence) ไม่เทรด`,
+                    `A bar closed outside the range but RVOL ${(confirmBarUp ?? confirmBarDn)!.rvol20.toFixed(2)} < 1.2 — breakout lacks force, volume not supportive (ORB evidence), no trade`,
                 );
             }
             return this.noTrade(
-                'ยังไม่มีแท่ง 15m ปิดนอกกรอบเอเชีย — รอ break ที่ยืนยันด้วยแท่งปิดก่อน (กัน false breakout)',
+                'No 15m bar has closed outside the Asian range yet — wait for a break confirmed by a closed bar first (avoid false breakout)',
             );
         }
         const brokeUp = brokeUpBar && !brokeDnBar ? true : brokeDnBar && !brokeUpBar ? false : price > (rH + rL) / 2;
@@ -430,30 +438,34 @@ export class GoldTaService {
 
         if ((brokeUp && !bull) || (!brokeUp && bull)) {
             return this.noTrade(
-                `มีแท่งปิดทะลุฝั่ง${brokeUp ? 'บน' : 'ล่าง'} แต่ทิศ 1H ขัด (EMA20 ${bull ? '>' : '<'} EMA50) — ไม่ไล่ (intraday #5)`,
+                `A bar closed through the ${brokeUp ? 'upper' : 'lower'} side but the 1H direction conflicts (EMA20 ${bull ? '>' : '<'} EMA50) — not chasing (intraday #5)`,
             );
         }
         // EMA200(1h) macro filter — research: ช่วยตัด false breakout ได้มาก
         if (!this.ema200Ready(h1)) {
             return this.noTrade(
-                `ข้อมูล 1h มี ${h1.length} แท่ง ไม่พอให้ EMA200 อุ่นตัว (ต้อง >= 250) — เช็ค macro filter ไม่ได้ ไม่เทรดรอบนี้`,
+                `1h data has only ${h1.length} bars, not enough to warm up EMA200 (need >= 250) — cannot check the macro filter, no trade this round`,
             );
         }
         if ((brokeUp && L1.close < L1.ema200) || (!brokeUp && L1.close > L1.ema200)) {
             return this.noTrade(
-                `break ฝั่ง${brokeUp ? 'บน' : 'ล่าง'} แต่ราคาอยู่${brokeUp ? 'ใต้' : 'เหนือ'} EMA200(1h) ${this.f(ctx, L1.ema200)} — สวน macro filter`,
+                `break on the ${brokeUp ? 'upper' : 'lower'} side but price is ${brokeUp ? 'below' : 'above'} EMA200(1h) ${this.f(ctx, L1.ema200)} — against the macro filter`,
             );
         }
         const edge = brokeUp ? rH : rL;
         if (bDir * (price - edge) > 1.2 * atrH)
-            return this.noTrade('ราคาวิ่งหนีขอบกรอบไปไกลแล้ว — เป้า 1.5×กรอบใกล้หมด ไม่ไล่');
+            return this.noTrade(
+                'Price has already run far from the range edge — the 1.5×range target is nearly used up, not chasing',
+            );
         if (bDir * (price - edge) < -0.3 * atrH) {
-            return this.noTrade('ราคากลับเข้ากรอบลึกหลังทะลุ (fake breakout) — ยกเลิก setup ตามวินัย');
+            return this.noTrade(
+                'Price fell back deep into the range after breaking out (fake breakout) — setup cancelled per discipline',
+            );
         }
         const entry = this.avoidRound(ctx, edge, -bDir);
         const sl = this.avoidRound(ctx, entry - bDir * slDist, -bDir);
         ctx.notes.push(
-            `แท่ง 15m ปิดทะลุกรอบ + ทิศ 1H/EMA200 หนุน → รอ retest ขอบกรอบ ${this.f(ctx, edge)} (intraday #2 retest)`,
+            `15m bar closed through the range + 1H/EMA200 direction supports → wait for a retest of the range edge ${this.f(ctx, edge)} (intraday #2 retest)`,
         );
         return this.buildLevels(ctx, {
             orderType: brokeUp ? 'BUY_LIMIT' : 'SELL_LIMIT',
@@ -474,7 +486,7 @@ export class GoldTaService {
     private analyzeScalp(ctx: Ctx): GoldDecision {
         const m5 = this.closed(ctx, seriesKey(ctx.p, '5m'));
         const m15 = this.closed(ctx, seriesKey(ctx.p, '15m'));
-        if (m5.length < 120 || m15.length < 40) return this.noTrade('ข้อมูล 5m/15m ไม่พอ');
+        if (m5.length < 120 || m15.length < 40) return this.noTrade('Not enough 5m/15m data');
 
         const atr5 = m5[m5.length - 1].atr14;
         const bull15 = m15[m15.length - 1].ema20 > m15[m15.length - 1].ema50;
@@ -492,7 +504,9 @@ export class GoldTaService {
 
             const dir = sweptLow ? 1 : -1;
             if (dir > 0 !== bull15) {
-                ctx.notes.push(`เจอ sweep ${sweptLow ? 'ก้นต่ำ' : 'ยอดสูง'} แต่ทิศ 15m ขัด — ข้าม`);
+                ctx.notes.push(
+                    `Found a sweep of the ${sweptLow ? 'low' : 'high'} but the 15m direction disagrees — skip`,
+                );
                 continue;
             }
 
@@ -504,7 +518,7 @@ export class GoldTaService {
             const strongClose = dir > 0 ? closePos >= 0.6 : closePos <= 0.4;
             if (barRange < 1.1 * atr5 || !strongClose || bar.rvol20 < 1.3) {
                 ctx.notes.push(
-                    `sweep ที่ ${this.f(ctx, sweptLow ? bar.low : bar.high)} ไม่ผ่านเกณฑ์คุณภาพ (range ${this.f(ctx, barRange)}/${this.f(ctx, 1.1 * atr5)} · close ${(closePos * 100).toFixed(0)}% · RVOL ${bar.rvol20.toFixed(2)}) — ข้าม`,
+                    `sweep at ${this.f(ctx, sweptLow ? bar.low : bar.high)} failed the quality criteria (range ${this.f(ctx, barRange)}/${this.f(ctx, 1.1 * atr5)} · close ${(closePos * 100).toFixed(0)}% · RVOL ${bar.rvol20.toFixed(2)}) — skip`,
                 );
                 continue;
             }
@@ -522,12 +536,12 @@ export class GoldTaService {
                 dir,
             );
             if ((dir * (tp1 - entry)) / risk < ctx.rrMin) {
-                ctx.notes.push('sweep เจอแต่ R:R หลังหลบเลขกลมไม่ถึงเกณฑ์ — ข้าม');
+                ctx.notes.push('Sweep found but R:R after avoiding round numbers is below threshold — skip');
                 continue;
             }
 
             ctx.notes.push(
-                `Liquidity sweep ${sweptLow ? 'กวาด low' : 'กวาด high'} ที่ ${this.f(ctx, extreme)} แล้ว reclaim ${this.f(ctx, level)} (scalp #1) · ทิศ 15m หนุน`,
+                `Liquidity sweep ${sweptLow ? 'swept the low' : 'swept the high'} at ${this.f(ctx, extreme)} then reclaimed ${this.f(ctx, level)} (scalp #1) · 15m direction supports`,
             );
             return this.finishDecision(ctx, {
                 order_type: dir > 0 ? 'BUY_LIMIT' : 'SELL_LIMIT',
@@ -564,7 +578,7 @@ export class GoldTaService {
                     );
                     if ((dir * (tp1 - entry)) / risk >= ctx.rrMin) {
                         ctx.notes.push(
-                            `Break กรอบเอเชีย ${this.f(ctx, rL)}–${this.f(ctx, rH)} ฝั่ง${brokeUp ? 'บน' : 'ล่าง'} → รอ retest ขอบ (scalp #2)`,
+                            `Break of Asian range ${this.f(ctx, rL)}–${this.f(ctx, rH)} on the ${brokeUp ? 'upper' : 'lower'} side → wait for edge retest (scalp #2)`,
                         );
                         return this.finishDecision(ctx, {
                             order_type: dir > 0 ? 'BUY_LIMIT' : 'SELL_LIMIT',
@@ -583,7 +597,7 @@ export class GoldTaService {
             }
         }
 
-        return this.noTrade('ไม่มี setup sweep/break-retest ที่เข้าเกณฑ์ในรอบนี้ — NO-TRADE ตามวินัย scalp');
+        return this.noTrade('No qualifying sweep/break-retest setup this round — NO-TRADE per scalp discipline');
     }
 
     // ================= shared level building =================
@@ -605,7 +619,7 @@ export class GoldTaService {
     ): GoldDecision {
         const { dir } = p;
         const risk = dir * (p.entry - p.sl);
-        if (risk <= 0) return this.noTrade('ระดับ SL/Entry ไม่สมเหตุผล');
+        if (risk <= 0) return this.noTrade('SL/Entry levels are not sensible');
 
         let tp1 = p.tpOverride ?? p.entry + dir * ctx.rrMin * risk * 1.1;
         tp1 = this.capBeforeRound(ctx, tp1, dir);
@@ -617,7 +631,7 @@ export class GoldTaService {
         const rr1 = (dir * (tp1 - p.entry)) / risk;
         if (rr1 < ctx.rrMin) {
             return this.noTrade(
-                `เป้าที่สมจริง (หลบเลขกลม/แม่เหล็ก) ให้ R:R ${rr1.toFixed(2)} < เกณฑ์ ${ctx.rrMin} — ไม่คุ้ม (playbook ${p.playbook})`,
+                `Realistic target (avoiding round numbers/magnets) gives R:R ${rr1.toFixed(2)} < threshold ${ctx.rrMin} — not worth it (playbook ${p.playbook})`,
             );
         }
         const tp2 = this.capBeforeRound(ctx, p.entry + dir * Math.max(rr1 * 1.7, ctx.rrMin * 1.6) * risk, dir);
@@ -665,13 +679,13 @@ export class GoldTaService {
             valid_until_utc: new Date(Date.now() + p.validHours * 3_600_000).toISOString(),
             invalidation:
                 p.dir > 0
-                    ? `ปิดแท่ง TF สั่งการต่ำกว่า ${r2(p.sl)} หรือโครงสร้างเปลี่ยนทิศ`
-                    : `ปิดแท่ง TF สั่งการเหนือ ${r2(p.sl)} หรือโครงสร้างเปลี่ยนทิศ`,
+                    ? `Execution-TF bar closes below ${r2(p.sl)} or structure flips direction`
+                    : `Execution-TF bar closes above ${r2(p.sl)} or structure flips direction`,
             playbook_ref: p.playbook,
             reason: ctx.notes[ctx.notes.length - 1] ?? p.playbook,
-            analysis_summary_th: '',
+            analysis_summary: '',
         };
-        d.analysis_summary_th = this.summary(ctx, d);
+        d.analysis_summary = this.summary(ctx, d);
         this.logger.log(
             `[${ctx.p.key} ${ctx.mode}] TA: ${d.order_type} @ ${d.entry} SL ${d.sl} TP1 ${d.tp1} RR ${d.rr_tp1} conf ${d.confidence} (${d.playbook_ref})`,
         );
@@ -705,7 +719,7 @@ export class GoldTaService {
             if (bars.length < 25) continue;
             const b = bars[bars.length - 1];
             const trend = (b.close > b.ema20 ? 1 : -1) + (b.ema20 > b.ema50 ? 1 : -1); // -2..2
-            const dirTxt = trend > 0 ? 'ขึ้น' : trend < 0 ? 'ลง' : 'ข้าง';
+            const dirTxt = trend > 0 ? 'up' : trend < 0 ? 'down' : 'sideways';
             const contrib = w * Math.sign(trend);
             score += contrib;
             ctx.compNotes.push(
@@ -919,16 +933,16 @@ export class GoldTaService {
 
     private summary(ctx: Ctx, d: GoldDecision): string {
         const lines = [
-            `โหมด ${ctx.mode} · ${ctx.p.key} (TA engine — วิเคราะห์จาก indicator จริง ไม่ใช้ AI)`,
+            `Mode ${ctx.mode} · ${ctx.p.key} (TA engine — analysis from real indicators, no AI)`,
             ...ctx.notes.map((n) => `• ${n}`),
-            `• ตัวประกอบสุทธิ: ${ctx.compScore > 0 ? 'หนุนฝั่งขึ้น' : ctx.compScore < 0 ? 'กดฝั่งลง' : 'กลาง'} (score ${ctx.compScore})`,
+            `• Net companions: ${ctx.compScore > 0 ? 'supports upside' : ctx.compScore < 0 ? 'pressures downside' : 'neutral'} (score ${ctx.compScore})`,
             ...ctx.compNotes.slice(0, 5).map((n) => `   - ${n}`),
         ];
         if (d.order_type !== 'NO_TRADE') {
             lines.push(
-                `• แผน A: ${d.order_type} @ ${d.entry} | SL ${d.sl} | TP1 ${d.tp1} | TP2 ${d.tp2} (R:R ${d.rr_tp1})`,
+                `• Plan A: ${d.order_type} @ ${d.entry} | SL ${d.sl} | TP1 ${d.tp1} | TP2 ${d.tp2} (R:R ${d.rr_tp1})`,
             );
-            lines.push(`• แผน B: ถ้า ${d.invalidation} → ยกเลิกออเดอร์ รอ setup ใหม่`);
+            lines.push(`• Plan B: if ${d.invalidation} → cancel the order, wait for a new setup`);
         }
         return lines.join('\n');
     }
@@ -942,7 +956,7 @@ export class GoldTaService {
         const c = kind
             ? { near_miss: kind === 'near_miss', near_miss_rule: kind === 'near_miss' ? 'explicit' : null }
             : classifyNoTrade(reason);
-        this.logger.log(`TA NO_TRADE${c.near_miss ? ` [เฉียด: ${c.near_miss_rule}]` : ''}: ${reason}`);
+        this.logger.log(`TA NO_TRADE${c.near_miss ? ` [near miss: ${c.near_miss_rule}]` : ''}: ${reason}`);
         return {
             order_type: 'NO_TRADE',
             entry: null,
@@ -956,7 +970,7 @@ export class GoldTaService {
             invalidation: '',
             playbook_ref: '',
             reason,
-            analysis_summary_th: reason,
+            analysis_summary: reason,
             near_miss: c.near_miss,
             near_miss_rule: c.near_miss_rule ?? undefined,
         };

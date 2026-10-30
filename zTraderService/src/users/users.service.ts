@@ -74,7 +74,7 @@ export class UsersService {
                 mustChangePassword: input.mustChangePassword ?? true,
             });
         } catch (e) {
-            if ((e as { code?: number }).code === 11000) throw new ConflictException('ชื่อผู้ใช้นี้มีอยู่แล้ว');
+            if ((e as { code?: number }).code === 11000) throw new ConflictException('This username already exists');
             throw e;
         }
     }
@@ -111,13 +111,13 @@ export class UsersService {
             const after = await this.users
                 .findOneAndUpdate({ _id: user._id }, { $set: set }, { returnDocument: 'after', runValidators: true })
                 .exec();
-            if (!after) throw new NotFoundException('ไม่พบผู้ใช้');
+            if (!after) throw new NotFoundException('User not found');
             return { before: user, after };
         }
         if (String(user._id) === actorId) {
-            throw new BadRequestException('ลดสิทธิ์หรือปิดบัญชีของตัวเองไม่ได้ — ให้ admin คนอื่นทำ');
+            throw new BadRequestException('You cannot demote or disable your own account — ask another admin');
         }
-        const lastAdmin = () => new BadRequestException('ต้องมี admin ที่ใช้งานได้อย่างน้อย 1 คนเสมอ');
+        const lastAdmin = () => new BadRequestException('There must always be at least 1 active admin');
         // cheap early answer for the common, non-racing case
         if ((await this.activeAdminCount()) <= 1) throw lastAdmin();
 
@@ -130,7 +130,7 @@ export class UsersService {
             .exec();
         if (!before) {
             // another admin changed this user between our read and our write; let the caller retry on fresh data
-            throw new ConflictException('ผู้ใช้นี้ถูกแก้ไขพร้อมกันจากที่อื่น — โหลดใหม่แล้วลองอีกครั้ง');
+            throw new ConflictException('This user was modified elsewhere at the same time — reload and try again');
         }
         if ((await this.activeAdminCount()) === 0) {
             const wrote = { role: set.role ?? before.role, disabled: set.disabled ?? before.disabled };
@@ -206,7 +206,7 @@ export class UsersService {
 
     private async mustFind(id: string): Promise<UserDocument> {
         const user = await this.users.findById(id).select('+passwordHash').exec();
-        if (!user) throw new NotFoundException('ไม่พบผู้ใช้');
+        if (!user) throw new NotFoundException('User not found');
         return user;
     }
 }

@@ -8,7 +8,7 @@ export function hasRole(user, minimum) {
 }
 
 export const UNVERIFIED_MESSAGE =
-    'zTraderService cannot be reached to confirm your account, so trading actions are paused. Reading still works.';
+    'Z Trader cannot be reached to confirm your account, so trading actions are paused. Reading still works.';
 
 /**
  * Single authorisation rule for HTTP and socket actions.
