@@ -6,7 +6,7 @@
 #
 # Always pass --env-file .env.compose. Without it, compose reads .env, which is the non-Docker dev
 # config, and the required secrets below make it stop with an error instead of starting.
-# Full guide, including Coolify: docs/deploy.md
+# Full guide: docs/deploy.md. Coolify uses the single-domain compose file at the repository root.
 
 name: ztrader
 
@@ -18,7 +18,10 @@ x-logging: &logging
 
 services:
   mongo:
-    image: mongo:8
+    # mongo:8 + docker/mongo/init-app-user.js (creates the least-privilege app user on first start)
+    build:
+      context: ./docker/mongo
+    image: ztrader-mongo:${IMAGE_TAG:-local}
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-root}
@@ -30,7 +33,6 @@ services:
     volumes:
       - mongo-data:/data/db
       - mongo-config:/data/configdb
-      - ./docker/mongo/init-app-user.js:/docker-entrypoint-initdb.d/10-init-app-user.js:ro
     # No `ports:`. MongoDB can only be reached from the internal `db` network.
     networks:
       - db

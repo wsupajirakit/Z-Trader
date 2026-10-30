@@ -1,5 +1,10 @@
 # Deploying zTraderActor on Coolify
 
+> **Usually not needed.** The repository root's `docker-compose.yml` already runs the Actor next to
+> zTraderService in one Coolify resource, with no domain of its own; the service dashboard drives it
+> (Strategy page). See `zTraderService/docs/deploy.md`, "Deploying on Coolify". Use the steps below only
+> to run the Actor as a separate application with its own public UI.
+
 ## 1. Create the resource
 
 - In Coolify, open your project and add an **Application** from your Git repository.

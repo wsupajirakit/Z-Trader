@@ -162,7 +162,8 @@ npm run user:create -- --username admin --role admin --name "Admin"
 #    The admin is created when the users collection is empty. Remove both afterwards.
 ```
 
-Both ways force a password change at the first login. Then run the service:
+The CLI forces a password change at the first login (unless `--no-force-change`). The bootstrap admin keeps the
+password you set, so pick a strong one and remove the variables after the first start. Then run the service:
 
 ```sh
 npm start                 # http://localhost:6500  (API + built dashboard)

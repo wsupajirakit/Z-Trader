@@ -167,49 +167,73 @@ The root password works the same way:
 `db.getSiblingDB("admin").changeUserPassword(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.NEW_PW)`,
 then update `MONGO_ROOT_PASSWORD`.
 
-## Deploying on Coolify ("Docker Compose" build pack)
+## Deploying on Coolify (one deployment, one domain)
 
-1. **New resource**: choose your Git repository, branch, and build pack **Docker Compose**. Leave the
-   base directory as `/` and the compose file as `/docker-compose.yml`.
-2. **Environment variables** (resource, then Environment Variables). Coolify lists every `${VAR}` from the
-   compose file, and marks the `${VAR:?…}` ones as required. Set:
-   - `API_KEY`, `MONGO_ROOT_PASSWORD`, `MONGO_APP_PASSWORD`, generated as above
-   - `TRUST_PROXY=1`, because Traefik is one hop in front. Without it the app doesn't see HTTPS, the
-     session cookie isn't marked Secure, and client IPs in the audit log are Traefik's
-   - `SESSION_COOKIE_SECURE=auto` (the default). Behind HTTPS this gives the `__Host-` Secure cookie
-   - `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` for the first deploy only, then delete them
-   - the cTrader values (`APP_ID`, `APP_SECRET`, `ACCESS_TOKEN`, `DEMO_ACCOUNT_ID`, …) and optional
-     `TELEGRAM_*` / `GEMINI_API_KEY`
+The repository root holds a compose file made for Coolify: [`docker-compose.yml`](../../docker-compose.yml). It
+builds and runs the whole stack from one resource:
 
-   Coolify writes these into the deployment's env file itself, so there's no `--env-file` step.
-3. **Domain**: assign a domain **only to `service`**, with the container port, e.g.
-   `https://trader.example.com:6500`. Don't give `mongo` a domain. Give `actor` one only if you run it
-   (e.g. `https://actor.example.com:3000`).
-4. **Storage**: the named volumes (`mongo-data`, `mongo-config`, `archive`, `data`) persist across
-   redeploys. Coolify prefixes them with the resource ID. Don't delete them when you redeploy, and set up
-   the backups above, or Coolify's scheduled backups, for the database.
-5. **Deploy**, then check the deployment log for `zTrader ready on :6500 (DEMO, production)`, and verify:
+| Service | Built from | Public | Role |
+|---|---|---|---|
+| `service` | `zTraderService/` (API + dashboard in one image) | **the only domain**, port 6500 | trading service, dashboard, REST + SSE |
+| `mongo` | `zTraderService/docker/mongo/` (mongo:8 + app-user init script) | no | database, on an internal network only |
+| `actor` | `zTraderActor/` | no | legacy strategy loop, driven from the dashboard's Strategy page |
+
+The browser only ever talks to the one domain: the dashboard, `/api/*` and the chart's Server-Sent Events are
+all served by `service`. No port is published on the server. Coolify's proxy (Traefik) reaches `service`
+over the resource network.
+
+### Steps
+
+1. **New resource** → your Git repository and branch → build pack **Docker Compose**. Base directory `/`,
+   compose file `/docker-compose.yml`.
+2. **Environment variables.** Coolify generates these on the first deploy and keeps them; leave them alone:
+   `SERVICE_PASSWORD_64_MONGOROOT`, `SERVICE_PASSWORD_64_MONGOAPP` (database passwords, letters and digits
+   only, so they are safe in the MongoDB URI), `SERVICE_HEX_64_APIKEY` (machine API key shared by `service`
+   and `actor`) and `SERVICE_URL_SERVICE_6500` (the generated domain). Set these yourself:
+
+   | Variable | Required | Value |
+   |---|---|---|
+   | `APP_ID`, `APP_SECRET`, `ACCESS_TOKEN` | yes | cTrader Open API application and access token |
+   | `DEMO_ACCOUNT_ID` | yes for DEMO | cTrader account id (`LIVE_ACCOUNT_ID` for LIVE) |
+   | `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD` | first deploy | first admin; delete both after the first start and redeploy |
+   | `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | no | AI layer (TA only without them) |
+   | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | no | notifications |
+   | `TV_AUTH_TOKEN` or `TV_USERNAME` / `TV_PASSWORD` | no | TradingView sign-in for chart data |
+   | `CTRADER_ACCOUNT_MODE`, `CTRADER_ALLOW_LIVE` | no | stay `DEMO` / `false` until you mean real money (see below) |
+
+   `TRUST_PROXY=1` is fixed in the compose file: Traefik is one hop in front, so the app sees HTTPS, issues the
+   `__Host-` Secure session cookie and logs real client IPs. A missing required value stops the deploy with
+   the variable's name.
+3. **Domain.** Coolify fills the domain of `service` from `SERVICE_URL_SERVICE_6500`. To use your own, set it
+   on `service` in the Domains section as `https://trader.example.com:6500` (the `:6500` is the container
+   port; visitors use plain HTTPS). Give no domain to `mongo` or `actor`.
+4. **Build options.** Turn on *Include Source Commit in Build*. The commit is then recorded with every
+   analysis round and order (`APP_COMMIT`).
+5. **Deploy.** The log should show `zTrader ready on :6500 (DEMO, production)`. Then check:
 
    ```bash
-   curl -fsS https://trader.example.com/health/ready                                      # {"status":"ok"}
+   curl -fsS https://trader.example.com/health/ready                                       # {"status":"ok"}
    curl -s -o /dev/null -w '%{http_code}\n' https://trader.example.com/api/dashboard/status # 401
    ```
 
-Notes:
+   Sign in with the bootstrap admin, delete `BOOTSTRAP_ADMIN_*` in Coolify and redeploy.
 
-- The compose `ports:` entry binds to `127.0.0.1` on the server, so it is not public. Traefik reaches
-  the container over Coolify's network. If another app on the same server already uses host port 6500,
-  set `HTTP_PORT` to a free port.
-- The actor is behind a compose profile, so a normal deploy does not start it. To run it, set
-  `COMPOSE_PROFILES=actor`, and make sure the build can see the zTraderActor source (`ACTOR_CONTEXT`). On
-  Coolify it's usually simpler to deploy zTraderActor as its own resource and point its `API_TRADER_URL`
-  at this service.
-- `docker/mongo/init-app-user.js` is bind-mounted from the repository checkout, which Coolify supports
-  for compose deployments. It runs only on the first deploy, when the database volume is still empty.
-- Keep the service at one replica. The trading loop and the cTrader socket are single-instance by
-  design.
-- Coolify stops containers with SIGTERM. `tini` passes it to Node, and `stop_grace_period: 30s` gives Nest
-  time to close the cTrader socket and Mongo.
+### Notes
+
+- **Persistence.** The named volumes `mongo-data`, `mongo-config`, `archive` (every analysis round) and
+  `data` (dashboard settings, risk profile marker, order log) survive redeploys. Coolify prefixes them with
+  the resource id. Don't delete them, and schedule backups (see above).
+- **Start order.** `mongo` must be healthy (its healthcheck logs in as the app user) before `service` starts,
+  and `service` must be healthy before `actor` starts. Health comes from the images' own checks
+  (`/health/ready` = HTTP up and MongoDB answering).
+- **One replica.** The trading loop and the cTrader socket are single-instance. Never scale `service`.
+- **Shutdown.** Coolify sends SIGTERM; `tini` passes it on and `stop_grace_period: 30s` lets Nest close the
+  cTrader socket and MongoDB.
+- **Hardening.** `service` and `actor` run as the `node` user on read-only root filesystems with every Linux
+  capability dropped; `mongo` sits on an internal network with no route out.
+- **Not on Coolify?** Run `zTraderService/docker-compose.yml` with an `.env.compose` instead (see
+  [Local quick start](#local-quick-start)); it publishes the ports on 127.0.0.1 and starts the actor only
+  with `--profile actor`.
 
 ## Enabling LIVE trading (real money)
 

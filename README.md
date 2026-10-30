@@ -36,10 +36,17 @@ flowchart LR
   zTraderService dashboard also ends or downgrades their sessions on the Actor, because the Actor re-checks
   `GET /api/v1/auth/users/:id`.
 
-## Run everything with Docker Compose
+## Deploy on Coolify (one deployment, one domain)
 
-The compose file lives in `zTraderService/`. It builds the Actor from `../zTraderActor` when the `actor`
-profile is enabled.
+The root [`docker-compose.yml`](docker-compose.yml) builds and runs the whole stack in one Coolify resource:
+`service` (API + dashboard, the only public domain), `mongo` (internal only) and `actor` (internal only,
+driven from the dashboard). Coolify generates the database passwords and the API key; you set the cTrader
+account and the first admin. Step by step: [zTraderService/docs/deploy.md](zTraderService/docs/deploy.md#deploying-on-coolify-one-deployment-one-domain).
+
+## Run everything with Docker Compose (self-hosted)
+
+The self-hosted compose file lives in `zTraderService/`. It builds the Actor from `../zTraderActor` when the
+`actor` profile is enabled.
 
 ```sh
 cd zTraderService
