@@ -8,7 +8,7 @@
 # Only the runtime stage ships. It contains dist/, web/dist/, proto/, package.json and production
 # node_modules, nothing else: no sources, no dev dependencies, no .env, no npm cache.
 
-ARG NODE_IMAGE=node:24-alpine
+ARG NODE_IMAGE=node:26-alpine
 
 # ---------------------------------------------------------------------------------------------------
 FROM ${NODE_IMAGE} AS base
@@ -68,7 +68,7 @@ LABEL org.opencontainers.image.title="zTraderService" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.created="${CREATED}" \
       org.opencontainers.image.licenses="UNLICENSED" \
-      org.opencontainers.image.base.name="docker.io/library/node:24-alpine"
+      org.opencontainers.image.base.name="docker.io/library/node:26-alpine"
 
 # tini as PID 1: forwards SIGTERM/SIGINT to node (Nest enableShutdownHooks closes the cTrader
 # socket and Mongo cleanly) and reaps zombies.

@@ -135,7 +135,7 @@ Store the dumps somewhere other than the Docker host.
 
 ```bash
 git pull
-dc build service                 # add --pull to refresh node:24-alpine for security fixes
+dc build service                 # add --pull to refresh node:26-alpine for security fixes
 dc up -d                         # recreates only what changed; volumes are kept
 dc ps && curl -fsS http://127.0.0.1:6500/health/ready
 ```
@@ -238,7 +238,7 @@ To go back to DEMO, set `CTRADER_ACCOUNT_MODE=DEMO` (or remove both variables) a
 
 ## Security properties of the image and stack
 
-- Multi-stage build on `node:24-alpine`. The runtime image contains only `dist/`, `web/dist/`, `proto/`,
+- Multi-stage build on `node:26-alpine`. The runtime image contains only `dist/`, `web/dist/`, `proto/`,
   `package.json` and production `node_modules`. It has no sources, dev dependencies, npm/yarn or npm cache.
 - The app runs as `node` (uid 1000). Its code is owned by root, so the process can't modify it. Only
   `/app/archive`, `/app/data` and a `/tmp` tmpfs are writable (`read_only: true`).

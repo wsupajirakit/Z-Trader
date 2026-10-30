@@ -125,7 +125,7 @@ The full HTTP contract is in [docs/api.md](docs/api.md).
 
 | Layer | Technology |
 |---|---|
-| Runtime | Node.js ≥ 24.11, TypeScript ~6.0 (strict) |
+| Runtime | Node.js 26 LTS (≥ 26.12.1), TypeScript ~6.0 (strict) |
 | API | NestJS 12.3 (Express), @nestjs/throttler 6.7, @nestjs/event-emitter, class-validator 0.15 |
 | Realtime | socket.io 4.8 (`@nestjs/platform-socket.io`) |
 | Broker | cTrader Open API over `ws` 8.22 + protobufjs 8.8 |
@@ -139,7 +139,7 @@ The full HTTP contract is in [docs/api.md](docs/api.md).
 
 ## Local development
 
-Prerequisites: Node.js 24.11 or later, and a MongoDB instance. You can use a local `mongod` or a throwaway
+Prerequisites: Node.js 26 LTS (26.12.1 or later), and a MongoDB instance. You can use a local `mongod` or a throwaway
 container (`docker run -d --name ztrader-mongo -p 27017:27017 mongo:8`). To run the whole stack in containers
 instead (`docker compose --env-file .env.compose up -d --build`), see [docs/deploy.md](docs/deploy.md).
 

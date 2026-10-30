@@ -54,7 +54,7 @@ remove them. With the `actor` profile the service reaches the Actor at `ACTOR_UR
 `http://actor:3000`). The dashboard is published on `127.0.0.1:6500` by default. Volumes, the reverse proxy, Coolify
 and the full variable list are covered in [zTraderService/docs/deploy.md](zTraderService/docs/deploy.md).
 
-To run without Docker (Node.js 24.11 or later), follow the local-development steps in each sub-README.
+To run without Docker (Node.js 26 LTS, 26.12.1 or later), follow the local-development steps in each sub-README.
 
 ## Documentation
 

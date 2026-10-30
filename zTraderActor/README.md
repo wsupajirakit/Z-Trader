@@ -112,7 +112,7 @@ don't configure them here.
 
 ## Run
 
-Requires Node.js 24 or later.
+Requires Node.js 26 LTS (26.12.1 or later).
 
 ```sh
 npm ci
@@ -134,7 +134,7 @@ injected clock and a stub trading engine, so they never start the real strategy 
 
 ## Deploy
 
-See [COOLIFY_DEPLOY.md](COOLIFY_DEPLOY.md). The Docker image is `node:24-alpine` and multi-stage. It installs
+See [COOLIFY_DEPLOY.md](COOLIFY_DEPLOY.md). The Docker image is `node:26-alpine` and multi-stage. It installs
 with `npm ci --omit=dev --ignore-scripts`, runs as `USER node`, and has a `HEALTHCHECK` on `/health`.
 
 ## Known issues (pre-existing, deliberately not changed)

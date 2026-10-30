@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 
 # ---- dependencies (production only, no install scripts) ----
-FROM node:24-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
 # ---- runtime ----
-FROM node:24-alpine
+FROM node:26-alpine
 ENV NODE_ENV=production
 WORKDIR /app
 
