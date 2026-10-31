@@ -9,6 +9,8 @@ const USERS = {
     victor: { id: 'u-view', username: 'victor', name: 'Victor Viewer', role: 'viewer' },
     adam: { id: 'u-admin', username: 'adam', name: 'Adam Admin', role: 'admin' },
     newbie: { id: 'u-new', username: 'newbie', name: 'New User', role: 'operator', mustChangePassword: true },
+    // the service's demo role: it must never get a session here (the Actor can start a real loop)
+    dora: { id: 'u-demo', username: 'dora', name: 'Dora Demo', role: 'demo' },
 };
 
 const isStr = (v, min, max) => typeof v === 'string' && v.length >= min && v.length <= max;

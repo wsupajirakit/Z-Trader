@@ -41,6 +41,7 @@ import {
 } from './domain/instruments';
 import { errorMessage } from '../common/utils/errors';
 import { DomainError } from './domain/domain-error';
+import { demoContext } from '../common/demo/demo-context';
 import { AI_STRICTNESS_LEVELS, type AiStrictness, STRICTNESS_MIN_AI_CONFIDENCE } from './ai/ai-strictness';
 
 /** off = TA only · assist = TA, then the AI confirms/vetoes · lead = assist + the AI proposes when TA finds nothing · ai_only = the AI decides every round */
@@ -175,6 +176,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * (ราคาสด/state/pending ของตราสารเดิมยังเก็บไว้ สลับกลับมาได้)
      */
     setInstrument(symbol: string) {
+        demoContext.assertNotDemo('Switching the instrument');
         if (this.isEnabled()) throw new DomainError('Stop the Auto Loop before changing the instrument');
         if (this.running.size)
             throw new DomainError(
@@ -746,6 +748,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     }
 
     private persistOverrides() {
+        demoContext.assertNotDemo('Saving settings');
         try {
             const f = this.settingsFile;
             fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -847,6 +850,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * ผ่านครบแล้วจึง apply + persist ในขั้นเดียว
      */
     setSettings(body: Record<string, any>, opts: { riskProfile?: RiskProfileMarker } = {}) {
+        demoContext.assertNotDemo('Changing settings');
         const map: Record<string, { key: string; min: number; max: number }> = {
             risk_usd_per_trade: { key: 'GOLD_RISK_USD_PER_TRADE', min: 1, max: 100_000 },
             daily_max_loss_usd: { key: 'GOLD_DAILY_MAX_LOSS_USD', min: 0, max: 1_000_000 },
@@ -1191,6 +1195,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
 
     /** ปุ่มรีเซ็ตโควตา AI บน dashboard — เริ่มนับใหม่ทันที ไม่ต้องรอข้ามวัน */
     resetAiCalls() {
+        demoContext.assertNotDemo('Resetting the AI quota');
         const max = parseInt(this.cfg('GOLD_AI_MAX_CALLS_PER_DAY', '10'), 10);
         const before = this.goldGeminiService.resetUsage();
         this.aiQuotaWarnedDay.clear();
@@ -1218,6 +1223,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * เป็นการปลดด่านความปลอดภัยด้วยมือ จึงบันทึกเสียงดังทั้ง log และ activity
      */
     resetDailyStop() {
+        demoContext.assertNotDemo('Clearing the daily stop');
         const before = this.pnlCache?.value ?? null;
         const limit = parseFloat(this.cfg('GOLD_DAILY_MAX_LOSS_USD', '4000'));
         const now = new Date();
@@ -1245,6 +1251,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * @param instruments ตราสารที่ loop จะวนเทรด — ไม่ส่งมา/ว่าง = คงค่าเดิม (default = ตัว active เดียว)
      */
     setAutomate(enabled: boolean, modes?: GoldMode[], instruments?: string[]) {
+        demoContext.assertNotDemo('Starting or stopping the loop');
         this.runtimeEnabled = enabled;
         if (modes?.length) this.runtimeModes = modes;
         // เช็ค .length เหมือน modes ข้างบน — [] ต้องแปลว่า "ไม่ได้ส่งมาจริง ๆ คงค่าเดิม"
@@ -1653,7 +1660,12 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         p: InstrumentProfile = this.profile,
     ): Promise<{ decision: GoldDecision | null; outcome: string }> {
         const cfg = { ...MODE_CFG[mode], rrMin: p.modes[mode]?.rrMin ?? MODE_CFG[mode].rrMin };
-        const st = this.getState(mode, p);
+        // demo role: the round runs for real (data, TA, guards) in a sandbox — its own throwaway state,
+        // simulated AI answers, no order, no pending decision, no archive record, no notification
+        const demo = demoContext.active;
+        const st: ModeState = demo
+            ? { lastRunAt: null, lastBarBucket: -1, lastDecision: null, lastOutcome: null, lastError: null }
+            : this.getState(mode, p);
         // ปิดรอบ = ติดป้ายตราสาร/โหมดของรอบนี้เสมอ (ห้ามพึ่ง this.currentMode ที่ใช้ร่วมกัน)
         const finish = (d: GoldDecision | null, outcome: string) => this.finish(st, d, outcome, p, mode);
         st.lastRunAt = new Date().toISOString();
@@ -1802,7 +1814,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             // indicators (playbook per mode) · =ai: Claude via ANTHROPIC_API_KEY
             const engine = this.engine();
             let decision: GoldDecision;
-            if (engine === 'ai') {
+            if (engine === 'ai' && demo) {
+                // demo: no Claude call; the TA decision stands in for the AI engine
+                if (!data.series) throw new Error('TA engine requires locally-built series (GOLD_DATA_SOURCE=local)');
+                const ta = this.goldTaService.analyze(mode, data.series, { rrMin: cfg.rrMin, sizeCap, profile: p });
+                decision = { ...ta, reason: `${ta.reason} | demo: simulated AI engine (no AI provider was called)` };
+                trace.base_decision = structuredClone(decision);
+            } else if (engine === 'ai') {
                 decision = await this.goldAiService.analyze(
                     data,
                     {
@@ -1872,9 +1890,9 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                         st.lastAssist = null;
                     } else {
                         const news = await this.newsForAssist(p, p.modes[mode]?.news ?? 15);
-                        const gotQuota = this.goldGeminiService.tryConsume(aiMaxCalls);
+                        const gotQuota = this.consumeAiQuota(aiMaxCalls);
                         const proposal = gotQuota
-                            ? await this.goldGeminiService.propose(
+                            ? await this.aiPropose(
                                   mode,
                                   data.series ?? null,
                                   {
@@ -1906,13 +1924,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     // โควตาอาจหมดระหว่าง await news (หลายตราสาร x หลายโหมดยิงพร้อมกัน
                     // และ launch() ไม่ await) — ต้องดูผลตอน "หักจริง" ไม่ใช่ตอนเช็คเพดานข้างบน
                     // หักไม่ได้ = ส่ง null ต่อ ซึ่งเป็นทาง "ไม่มี AI" ที่มีอยู่แล้ว (TA ล้วน)
-                    const gotQuota = this.goldGeminiService.tryConsume(aiMaxCalls);
+                    const gotQuota = this.consumeAiQuota(aiMaxCalls);
                     if (!gotQuota)
                         this.logger.warn(
                             `[${p.key}/${mode}] AI quota ran out right before the call — TA only this round`,
                         );
                     const proposal = gotQuota
-                        ? await this.goldGeminiService.propose(
+                        ? await this.aiPropose(
                               mode,
                               data.series ?? null,
                               {
@@ -1940,13 +1958,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     // โควตาอาจหมดระหว่าง await news (หลายตราสาร x หลายโหมดยิงพร้อมกัน
                     // และ launch() ไม่ await) — ต้องดูผลตอน "หักจริง" ไม่ใช่ตอนเช็คเพดานข้างบน
                     // หักไม่ได้ = ส่ง null ต่อ ซึ่งเป็นทาง "ไม่มี AI" ที่มีอยู่แล้ว (TA ล้วน)
-                    const gotQuota = this.goldGeminiService.tryConsume(aiMaxCalls);
+                    const gotQuota = this.consumeAiQuota(aiMaxCalls);
                     if (!gotQuota)
                         this.logger.warn(
                             `[${p.key}/${mode}] AI quota ran out right before the call — TA only this round`,
                         );
                     const assist = gotQuota
-                        ? await this.goldGeminiService.assist(
+                        ? await this.aiAssist(
                               mode,
                               decision,
                               data.series ?? null,
@@ -2004,10 +2022,23 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
 
             // dry run: park the validated decision for a second-opinion review
             // (Claude skill) — /gold/confirm executes it within PENDING_TTL_MS
+            if (dryRun && demo) {
+                // never parked: a parked decision can be fired by anyone with operator rights
+                return (archResult = finish(decision, 'awaiting-approval (demo — not stored, cannot be fired)'));
+            }
             if (dryRun) {
                 const id = randomUUID().slice(0, 8);
                 this.pending.set(this.sk(mode, p), { id, decision, sizeCap, createdAt: Date.now(), trace });
                 return (archResult = finish(decision, `awaiting-approval:${id}`));
+            }
+
+            if (demo) {
+                const sizing = this.sizeOrder(decision.size, sizeCap, decision.entry, decision.sl, p);
+                trace.sizing = sizing;
+                return (archResult = finish(
+                    decision,
+                    `order simulated (demo — nothing was sent to the broker): ${sizing.lots} lot`,
+                ));
             }
 
             // place the order
@@ -2022,8 +2053,53 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         } finally {
             // เก็บประวัติทุกรอบเป็น .json ใน /archive (วันเวลา UTC + ไทย)
             trace.market = this.tickSnapshot(p);
-            this.archiveRound(mode, archData, archResult, p, trace);
+            // demo rounds stay out of the archive: it is the record of the real bot (backtests)
+            if (!demo) this.archiveRound(mode, archData, archResult, p, trace);
         }
+    }
+
+    /** the AI quota is shared and costs money; demo rounds never touch it */
+    private consumeAiQuota(max: number): boolean {
+        return demoContext.active ? true : this.goldGeminiService.tryConsume(max);
+    }
+
+    /** Gemini assist, or in a demo request a simulated answer (no provider is called) */
+    private aiAssist(...args: Parameters<GoldGeminiService['assist']>): ReturnType<GoldGeminiService['assist']> {
+        if (!demoContext.active) return this.goldGeminiService.assist(...args);
+        const ta = args[1];
+        return Promise.resolve({
+            verdict: 'CONFIRM',
+            entry: null,
+            sl: null,
+            tp1: null,
+            tp2: null,
+            size: ta.size,
+            confidence: ta.confidence,
+            key_levels: '',
+            risk_note: '',
+            reason: 'Simulated AI answer (demo role — no AI provider was called)',
+        } as unknown as Awaited<ReturnType<GoldGeminiService['assist']>>);
+    }
+
+    /** Gemini proposal (lead / AI only), or in a demo request a simulated "no setup" (no provider is called) */
+    private aiPropose(...args: Parameters<GoldGeminiService['propose']>): ReturnType<GoldGeminiService['propose']> {
+        if (!demoContext.active) return this.goldGeminiService.propose(...args);
+        return Promise.resolve({
+            action: 'NO_TRADE',
+            order_type: 'NO_TRADE',
+            entry: null,
+            sl: null,
+            tp1: null,
+            tp2: null,
+            size: 'quarter',
+            confidence: 0,
+            playbook_ref: '',
+            key_levels: '',
+            risk_note: '',
+            news_risk: '',
+            invalidation: '',
+            reason: 'Simulated AI answer (demo role — no AI provider was called)',
+        } as unknown as Awaited<ReturnType<GoldGeminiService['propose']>>);
     }
 
     /** ข่าวสำหรับ AI assist — ล้มเหลว/ช้า = ส่งลิสต์ว่าง ไม่ทำให้รอบสะดุด */
@@ -2062,6 +2138,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         mode: GoldMode,
         id: string,
     ): Promise<{ uuid: string; decision: GoldDecision; warning?: string }> {
+        demoContext.assertNotDemo('Firing a parked decision');
         const prof = this.profile;
         const key = this.sk(mode, prof);
         const p = this.pending.get(key);
@@ -2110,6 +2187,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
 
     /** discard a parked decision (review rejected it) */
     rejectPending(mode: GoldMode, id: string, reason: string): boolean {
+        demoContext.assertNotDemo('Rejecting a parked decision');
         const key = this.sk(mode);
         const p = this.pending.get(key);
         if (!p || p.id !== id) return false;
@@ -2624,6 +2702,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     }
 
     private async notify(mode: GoldMode, d: GoldDecision, headline: string, p: InstrumentProfile = this.profile) {
+        if (demoContext.active) return; // demo rounds never notify the real chat
         const lines = [
             `${p.emoji} <b>[${p.key} ${mode.toUpperCase()}] ${headline}</b>`,
             d.order_type !== 'NO_TRADE'

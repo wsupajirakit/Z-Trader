@@ -1,6 +1,7 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { errorMessage } from '../common/utils/errors';
+import { demoContext } from '../common/demo/demo-context';
 
 export const ACTOR_TIMEOUT_MS = 5_000;
 
@@ -103,6 +104,7 @@ export class ActorBridgeService {
     }
 
     private async act(user: string, path: string, body: Record<string, unknown>): Promise<ActorActionResult> {
+        demoContext.assertNotDemo('Starting or stopping the strategy loop');
         const up = await this.call('POST', path, { user, body });
         if (up.kind === 'unavailable') {
             throw bridgeError(

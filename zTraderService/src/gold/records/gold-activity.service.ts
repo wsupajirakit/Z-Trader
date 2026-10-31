@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { demoContext } from '../../common/demo/demo-context';
 
 export interface ActivityEntry {
     id: number;
@@ -20,6 +21,7 @@ export class GoldActivityService {
     private nextId = 1;
 
     push(level: ActivityEntry['level'], message: string, mode: string | null = null): ActivityEntry {
+        if (demoContext.active) message = `[DEMO ${demoContext.username ?? ''}] ${message}`;
         const now = new Date();
         const e: ActivityEntry = {
             id: this.nextId++,

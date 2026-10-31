@@ -7,7 +7,8 @@
 
 // ───────────────────────────── auth / users / audit ─────────────────────────────
 
-export type Role = 'admin' | 'operator' | 'viewer';
+/** `demo` passes every role check, but the server simulates every write it makes (no orders, no AI calls). */
+export type Role = 'admin' | 'operator' | 'viewer' | 'demo';
 
 export interface User {
   id: string;

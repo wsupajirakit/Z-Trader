@@ -50,11 +50,39 @@ Request bodies are validated with a whitelist, so unknown fields are rejected wi
 | `viewer` | read every dashboard endpoint |
 | `operator` | viewer, plus every trading action and settings write |
 | `admin` | operator, plus user management and the audit log |
+| `demo` | open every screen and press every button, with nothing real happening (see below) |
+
+### The demo role
+
+A `demo` user sees the same screens and gets the same `2xx` answers as an admin, but nothing is placed, sent,
+called or saved. Every layer enforces this:
+
+- **Reads** (`GET`/`HEAD`/`OPTIONS`) run normally.
+- **Own account** writes run normally: logout, change password, revoke own sessions.
+- **`POST /api/dashboard/run` and `/analyze`** really run the analysis on live market data inside a sandbox:
+  - throwaway mode state
+  - simulated AI answers (no AI provider is called, no quota is used)
+  - no parked decision
+  - the lot size is computed but no order is sent
+  - no archive file and no Telegram message
+  - activity lines are labelled `[DEMO <username>]`
+- **Every other write** is not executed. It answers
+  `200 { demo: true, simulated: true, message }` and leaves one `demo.simulated` row in the audit log.
+- **Sinks refuse demo work** even if a route were missed. This is checked through an `AsyncLocalStorage` context
+  that follows the request into timers and promises. The refusing sinks are:
+  - cTrader requests other than read-only ones
+  - order placement and order records
+  - the Gemini and Claude clients
+  - the Actor bridge
+  - every automate-state setter
+- **CSRF and rate limits** still apply.
+- **The Actor** refuses demo sign-ins with `403` and ends a demo session when it re-checks the user, because it
+  runs a real strategy loop.
 
 ### Types
 
 ```ts
-type Role = 'admin' | 'operator' | 'viewer';
+type Role = 'admin' | 'operator' | 'viewer' | 'demo';
 
 interface User {
   id: string;

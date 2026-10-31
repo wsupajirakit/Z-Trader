@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { errorMessage } from '../common/utils/errors';
 import { Order, OrderDocument } from './schemas/order.schema';
+import { demoContext } from '../common/demo/demo-context';
 
 @Injectable()
 export class OrdersService implements OnApplicationBootstrap {
@@ -32,6 +33,7 @@ export class OrdersService implements OnApplicationBootstrap {
 
     /** uuid is a unique index, so the insert itself is the duplicate check (no find-then-insert race) */
     async createOrder(orderData: Partial<Order>): Promise<OrderDocument> {
+        demoContext.assertNotDemo('Recording an order');
         try {
             return await this.orderModel.create(orderData);
         } catch (e) {
@@ -41,6 +43,7 @@ export class OrdersService implements OnApplicationBootstrap {
     }
 
     async updateOrderStatus(uuid: string, status: string, details?: any) {
+        demoContext.assertNotDemo('Changing an order');
         return this.orderModel.findOneAndUpdate({ uuid }, { status, ...details }, { returnDocument: 'after' }).exec();
     }
 
@@ -55,6 +58,7 @@ export class OrdersService implements OnApplicationBootstrap {
 
     /** attach extra metadata (e.g. archive file path) to an order after the fact */
     async attachMeta(uuid: string, meta: Partial<Order>) {
+        demoContext.assertNotDemo('Changing an order');
         return this.orderModel.findOneAndUpdate({ uuid }, { $set: meta }).exec();
     }
 

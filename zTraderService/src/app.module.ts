@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -11,6 +11,7 @@ import { AuthGuard } from './auth/guards/auth.guard';
 import { ChartModule } from './chart/chart.module';
 import { CsrfGuard } from './auth/guards/csrf.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
+import { DemoInterceptor } from './common/demo/demo.interceptor';
 import { validateEnv } from './config/env.validation';
 import { CtraderModule } from './ctrader/ctrader.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -67,6 +68,8 @@ import { UsersModule } from './users/users.module';
         { provide: APP_GUARD, useClass: AuthGuard },
         { provide: APP_GUARD, useClass: CsrfGuard },
         { provide: APP_GUARD, useClass: RolesGuard },
+        // after the guards (principal known): simulates demo writes, runs demo work in demoContext
+        { provide: APP_INTERCEPTOR, useClass: DemoInterceptor },
     ],
 })
 export class AppModule {}

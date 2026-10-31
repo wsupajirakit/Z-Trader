@@ -104,7 +104,8 @@ Nothing on the server side comes from OpenTerminalUI. Below is how the main part
 - Upstream subscriptions are shared between viewers and closed when nobody is watching.
 
 **Security and accounts** (`src/auth`, `src/users`, `src/audit`)
-- Session cookies with CSRF protection and three roles (viewer / operator / admin).
+- Session cookies with CSRF protection and four roles (viewer / operator / admin / demo). Demo is simulated
+  end to end: no order, no AI call, nothing saved. The UI shows a banner and a "simulated" toast.
 - Forced password change, an audit log of every action, a strict CSP with a per-request style nonce.
 - The machine API key is never accepted from a browser.
 

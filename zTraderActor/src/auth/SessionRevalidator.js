@@ -112,6 +112,8 @@ export class SessionRevalidator {
         if (res.status !== 200) return { kind: 'unavailable', reason: `HTTP ${res.status}` };
 
         const u = data?.user;
+        // switched to a role this app does not allow (e.g. "demo"): end the session
+        if (u && typeof u.role === 'string' && !ROLES.includes(u.role)) return { kind: 'gone' };
         if (!u || u.id !== id || typeof u.username !== 'string' || !ROLES.includes(u.role)) {
             return { kind: 'unavailable', reason: 'malformed user record' };
         }

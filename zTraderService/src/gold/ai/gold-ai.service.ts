@@ -4,6 +4,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { GoldExport } from '../data/gold-data.service';
 import { InstrumentProfile, XAUUSD_PROFILE } from '../domain/instruments';
 import { errorMessage } from '../../common/utils/errors';
+import { demoContext } from '../../common/demo/demo-context';
 import { AI_STRICTNESS_LEVELS, type AiStrictness, STRICTNESS_INSTRUCTION } from './ai-strictness';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
@@ -120,6 +121,7 @@ export class GoldAiService {
     constructor(private configService: ConfigService) {}
 
     private getClient(): Anthropic {
+        demoContext.assertNotDemo('Calling Claude');
         if (!this.client) {
             const apiKey = this.configService.get<string>('ANTHROPIC_API_KEY');
             if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');
@@ -169,6 +171,8 @@ export class GoldAiService {
 
     /** Claude models available to this API key (Models API, cached 1 h); empty without a key */
     async listModels(): Promise<Array<{ id: string; label: string }>> {
+        // demo role: no request to the provider; the last real list (if any) is shown
+        if (demoContext.active) return this.modelsCache?.list ?? [];
         if (!this.hasKey) return [];
         if (this.modelsCache && Date.now() - this.modelsCache.at < 3_600_000) return this.modelsCache.list;
         const list: Array<{ id: string; label: string; created: string }> = [];

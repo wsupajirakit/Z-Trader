@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { errorMessage } from '../common/utils/errors';
+import { demoContext } from '../common/demo/demo-context';
 
 @Injectable()
 export class TelegramService {
@@ -27,6 +28,7 @@ export class TelegramService {
     }
 
     private async sendMessage(text: string) {
+        if (demoContext.active) return; // demo role: never notify the real chat
         if (!this.botToken || !this.chatId) {
             this.logger.warn('Telegram Bot Token or Chat ID not configured. Skipping notification.');
             return;

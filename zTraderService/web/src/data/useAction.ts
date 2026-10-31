@@ -7,6 +7,21 @@ import { describeError } from '../api/client';
 import { useNotify } from '../components/dialogs/context';
 import { useActivityLog } from '../features/activity/ActivityLogContext';
 
+/** the server's answer to a write made by the demo role (src/common/demo/demo.interceptor.ts) */
+export interface SimulatedResult {
+  demo: true;
+  simulated: true;
+  message: string;
+}
+
+export function isSimulated(r: unknown): r is SimulatedResult {
+  return (
+    typeof r === 'object' &&
+    r !== null &&
+    (r as { simulated?: unknown }).simulated === true
+  );
+}
+
 /**
  * A write from the UI: runs the request, writes the outcome to the System Log and a toast,
  * then refreshes the given queries whatever happened.
@@ -25,6 +40,13 @@ export function useAction<V, R>(opts: {
   return useMutation({
     mutationFn: opts.fn,
     onSuccess: (r, v) => {
+      if (isSimulated(r)) {
+        log.append(`[DEMO] ${r.message}`, 'warn', opts.tag ?? null);
+        notify(r.message, 'info');
+        // close dialogs / reset forms as after a real success (handlers here never read the result)
+        opts.onSuccess?.(r, v);
+        return;
+      }
       const msg = opts.success?.(r, v);
       if (msg) {
         log.append(msg, 'order', opts.tag ?? null);

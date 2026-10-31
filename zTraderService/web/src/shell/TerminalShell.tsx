@@ -5,6 +5,7 @@ import { ActivityLogProvider } from '../features/activity/ActivityLogProvider';
 import { CommandBar } from './CommandBar';
 import { CommandPalette, ShortcutsDialog } from './CommandPalette';
 import { ContextRail } from './ContextRail';
+import { DemoBanner } from './DemoBanner';
 import { IconRail } from './IconRail';
 import { StatusBar } from './StatusBar';
 import { terminalStore, useTerminalPrefs } from './terminalStore';
@@ -89,6 +90,7 @@ export function TerminalShell() {
             flexDirection: 'column',
           }}
         >
+          <DemoBanner />
           <CommandBar />
           {prefs.tickerTape ? <TickerTape /> : null}
           <TopBar />

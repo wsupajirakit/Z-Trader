@@ -40,6 +40,9 @@ export class CredentialVerifier {
         }
 
         const u = data?.user;
+        // a role this app does not know (e.g. the service's "demo" role) never gets a session here:
+        // the Actor runs a real strategy loop and has no simulation mode
+        if (u && typeof u.role === 'string' && !ROLES.includes(u.role)) return { ok: false, status: 403 };
         if (!u || typeof u.id !== 'string' || typeof u.username !== 'string' || !ROLES.includes(u.role)) {
             throw new Error('auth verify returned a malformed user');
         }

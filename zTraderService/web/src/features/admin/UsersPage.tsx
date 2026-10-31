@@ -30,10 +30,11 @@ import { ROLE_LABEL, ROLES } from '../auth/roles';
 import { useCurrentUser } from '../auth/session';
 import { usersQuery } from './usersQuery';
 
-const ROLE_COLOR: Record<Role, 'default' | 'info' | 'primary'> = {
+const ROLE_COLOR: Record<Role, 'default' | 'info' | 'primary' | 'warning'> = {
   viewer: 'default',
   operator: 'info',
   admin: 'primary',
+  demo: 'warning',
 };
 
 function CreateUserDialog({

@@ -12,6 +12,13 @@ describe('login, /me, logout', () => {
     after(() => h.close());
     beforeEach(() => h.stub.reset());
 
+    test('a demo-role user cannot sign in to the Actor (it could start a real strategy loop)', async () => {
+        const r = await h.request('/login', { method: 'POST', body: { username: 'dora', password: PASSWORD } });
+        assert.equal(r.status, 403);
+        assert.equal(r.body.error, 'this account cannot use the strategy runner');
+        assert.equal(r.res.headers.get('set-cookie'), null);
+    });
+
     test('successful login returns the user and a CSRF token and calls the service verify contract', async () => {
         const r = await h.request('/login', {
             method: 'POST',

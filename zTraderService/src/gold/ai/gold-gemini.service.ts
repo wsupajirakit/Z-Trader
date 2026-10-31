@@ -14,6 +14,7 @@ import {
     usdPerUnitMovePerLot,
 } from '../domain/instruments';
 import { marketStatus } from '../domain/market-hours';
+import { demoContext } from '../../common/demo/demo-context';
 import {
     AI_STRICTNESS_LEVELS,
     type AiStrictness,
@@ -405,6 +406,8 @@ export class GoldGeminiService {
      * เรียงรุ่นใหม่ไว้บน · จำกัดจำนวนให้เลือกง่าย (flash หลายตัว + pro)
      */
     async listModels(): Promise<Array<{ id: string; label: string; out: number }>> {
+        // demo role: no request to the provider; the last real list (if any) is shown
+        if (demoContext.active) return this.modelsCache?.list ?? [];
         if (this.modelsCache && Date.now() - this.modelsCache.at < 3_600_000) return this.modelsCache.list;
         if (!this.apiKey) return [];
         const res = await fetch(
@@ -447,6 +450,7 @@ export class GoldGeminiService {
     }
 
     private getClient(): GoogleGenAI {
+        demoContext.assertNotDemo('Calling Gemini');
         if (!this.client) {
             if (!this.apiKey) throw new Error('GEMINI_API_KEY is not configured');
             this.client = new GoogleGenAI({ apiKey: this.apiKey });

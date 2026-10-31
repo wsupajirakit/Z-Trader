@@ -65,6 +65,10 @@ export function authRoutes({ sessions, verifier, loginRateLimit }) {
                 res.set('Retry-After', String(result.retryAfterSec));
                 return res.status(429).json({ error: TOO_MANY_ATTEMPTS, retryAfterSec: result.retryAfterSec });
             }
+            if (result.status === 403) {
+                log.info(`login refused for "${creds.username}": role not allowed on the strategy runner`);
+                return res.status(403).json({ error: 'this account cannot use the strategy runner' });
+            }
             log.info(`login failed for "${creds.username}" from ${req.ip}`);
             return res.status(401).json({ error: 'invalid username or password' });
         }

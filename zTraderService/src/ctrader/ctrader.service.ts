@@ -6,6 +6,23 @@ import * as path from 'path';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { errorMessage, errorStack } from '../common/utils/errors';
 import { HISTORY_MIN_INTERVAL_MS, HISTORY_REQUESTS, RequestLimiter, retryOnRateLimit } from './history-limiter';
+import { demoContext } from '../common/demo/demo-context';
+
+/** the only cTrader requests a demo-role request may send: market data and account reads */
+const DEMO_READ_ONLY_REQUESTS: ReadonlySet<string> = new Set([
+    'ProtoOATraderReq',
+    'ProtoOAReconcileReq',
+    'ProtoOASymbolsListReq',
+    'ProtoOASymbolByIdReq',
+    'ProtoOAGetTrendbarsReq',
+    'ProtoOAGetTickDataReq',
+    'ProtoOADealListReq',
+    'ProtoOADealListByPositionIdReq',
+    'ProtoOASubscribeSpotsReq',
+    'ProtoOAUnsubscribeSpotsReq',
+    'ProtoOASubscribeLiveTrendbarReq',
+    'ProtoOAUnsubscribeLiveTrendbarReq',
+]);
 
 const HEARTBEAT_MS = 10_000; // ต้องต่ำกว่า idle timeout ~30s ของ cTrader ให้มีที่เหลือเฟือ
 
@@ -413,6 +430,10 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
     }
 
     public send(payloadTypeName: string, payload: any, clientMsgId?: string) {
+        // demo role: nothing but reads may reach the broker (orders, amendments, cancels, closes refused)
+        if (demoContext.active && !DEMO_READ_ONLY_REQUESTS.has(payloadTypeName)) {
+            demoContext.assertNotDemo(`cTrader ${payloadTypeName}`);
+        }
         if (!this.isConnected) {
             // เดิม log แล้ว return เฉย ๆ = คำขอหายไปเงียบ ๆ ผู้เรียกรอจนหมดเวลาแล้วนึกว่า
             // "server ช้า" ทั้งที่จริงคือไม่ได้ส่งออกไปเลย (26 ส.ค.: 93 ครั้งใน 1 วัน)

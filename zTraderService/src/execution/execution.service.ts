@@ -6,6 +6,7 @@ import { TelegramService } from '../telegram/telegram.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import { errorMessage } from '../common/utils/errors';
+import { demoContext } from '../common/demo/demo-context';
 @Injectable()
 export class ExecutionService {
     private readonly logger = new Logger(ExecutionService.name);
@@ -30,6 +31,7 @@ export class ExecutionService {
     ) {}
 
     async executeOrder(orderParams: any, retryCount = 0) {
+        demoContext.assertNotDemo('Placing an order');
         const { uuid } = orderParams;
 
         try {
