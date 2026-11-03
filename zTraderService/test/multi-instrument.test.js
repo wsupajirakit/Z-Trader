@@ -204,7 +204,8 @@ function fakeAuto(overrides = {}) {
         const failing = fakeAuto({});
         failing.ctraderService = { getPositions: async () => { throw new Error('boom'); } };
         const safe = await failing.getOpenPositionsAllInstruments();
-        t('broker ล้ม → คืน 0 ไม่ throw (fail-safe)', safe === 0);
+        // unknown exposure must block new orders, never read as "nothing open" (3 Nov 2026)
+        t('broker ล้ม → นับเป็นเต็มเพดาน ไม่ throw (fail-closed)', safe >= Number.MAX_SAFE_INTEGER);
     }
 
     console.log('\n=== 8. launch() ล็อกตราสารที่ถูกต้องเข้า running key ===');

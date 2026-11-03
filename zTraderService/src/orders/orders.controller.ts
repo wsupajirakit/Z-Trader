@@ -174,6 +174,14 @@ export class OrdersController {
         };
     }
 
+    /** flatten the account: every open position closed at market, every pending order cancelled */
+    @Post('orders/close-all')
+    @HttpCode(HttpStatus.OK)
+    @MachineAudited('order.close_all')
+    async closeAll() {
+        return this.ctraderService.closeAll();
+    }
+
     @Post('orders')
     @HttpCode(HttpStatus.ACCEPTED)
     @MachineAudited('order.create', 'uuid')

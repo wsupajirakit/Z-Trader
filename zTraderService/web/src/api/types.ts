@@ -422,6 +422,11 @@ export interface ArchiveEntry {
 export type ArchiveFile = Record<string, unknown>;
 
 export interface Position {
+  /** RUNNING = filled, the position is live; WAITING = a limit/stop order that has not filled yet */
+  state: 'RUNNING' | 'WAITING';
+  /** for WAITING rows: the pending order's type (its price is `entry`) */
+  orderType?: 'LIMIT' | 'STOP';
+  /** position id (RUNNING) or order id (WAITING) */
   positionId: number;
   symbol: string;
   digits: number;
@@ -431,6 +436,51 @@ export interface Position {
   stopLoss: number | null;
   takeProfit: number | null;
   openedAt: number | null;
+}
+
+/** latest bid/ask from `GET /api/dashboard/quotes/stream` (`at` = ms since epoch) */
+export interface Quote {
+  bid: number;
+  ask: number;
+  at: number;
+}
+
+/** One row of the trade ledger (`GET /api/dashboard/trades`): a position of any instrument, kept forever. */
+export interface LedgerTrade {
+  positionId: number;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  lots: number;
+  digits: number;
+  entry: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  openedAt: string;
+  status: 'OPEN' | 'CLOSED';
+  closedAt?: string;
+  closePrice?: number;
+  /** TP / SL = closed at its own level; MANUAL = market close; absent = read back from history */
+  closeReason?: 'TP' | 'SL' | 'MANUAL';
+  closedLots: number;
+  grossUsd: number;
+  commissionUsd: number;
+  swapUsd: number;
+  netUsd: number;
+  mode?: string;
+  strategy?: string;
+}
+
+export interface LedgerResponse {
+  trades: LedgerTrade[];
+  summary: {
+    open: number;
+    closed: number;
+    wins: number;
+    net_usd: number;
+    gross_usd: number;
+  };
+  /** cursor for the next page (openedAt of the last row), null on the last page */
+  next_before: number | null;
 }
 
 export interface TradeRow {

@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, buildUrl } from './client';
 import type {
   ActivityResponse,
   AiModelsResponse,
@@ -12,6 +12,7 @@ import type {
   DailyStopResetResult,
   GoldMode,
   HistoryResponse,
+  LedgerResponse,
   InstrumentsResponse,
   ModesResponse,
   NewsItem,
@@ -60,6 +61,13 @@ export const dashboardApi = {
   ) => api.get<ArchiveFile>(archiveFileUrl(mode, file, full), { signal }),
   positions: (signal?: AbortSignal) =>
     api.get<Position[]>(`${base}/positions`, { signal }),
+  trades: (
+    q: { status?: 'open' | 'closed' | 'all'; limit?: number; before?: number },
+    signal?: AbortSignal,
+  ) => api.get<LedgerResponse>(`${base}/trades`, { query: { ...q }, signal }),
+  /** EventSource URL for live bid/ask of these instruments (same origin, the session cookie authorises it) */
+  quotesStreamUrl: (symbols: readonly string[]) =>
+    buildUrl(`${base}/quotes/stream`, { symbols: symbols.join(',') }),
   history: (days: number, signal?: AbortSignal) =>
     api.get<HistoryResponse>(`${base}/history`, { query: { days }, signal }),
   aiModels: (signal?: AbortSignal) =>

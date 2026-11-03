@@ -8,3 +8,11 @@ export class DomainError extends Error {
         this.name = 'DomainError';
     }
 }
+
+/** a round that decided not to send its order (not a fault): recorded as `skipped`, no alert */
+export class OrderSkipped extends DomainError {
+    constructor(message: string) {
+        super(message);
+        this.name = 'OrderSkipped';
+    }
+}

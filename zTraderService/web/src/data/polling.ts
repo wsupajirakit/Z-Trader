@@ -4,6 +4,7 @@ export const POLL_MS = {
   status: 5_000,
   settings: 15_000,
   positions: 10_000,
+  trades: 30_000,
   account: 30_000,
   archive: 30_000,
   aiModelsRetry: 15_000,

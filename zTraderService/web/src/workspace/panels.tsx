@@ -1,9 +1,7 @@
-import Box from '@mui/material/Box';
 import type { ReactNode } from 'react';
 import { ActivityLogView } from '../features/activity/ActivityLogView';
 import { AiSettings } from '../features/ai/AiSettings';
-import { ExecutionControl } from '../features/bot/ExecutionControl';
-import { ManualRun } from '../features/bot/ManualRun';
+import { ExecutionPanel } from '../features/bot/ExecutionPanel';
 import { ModeCards } from '../features/bot/ModeCards';
 import { ChartView } from '../features/chart/ChartView';
 import { HistoryView } from '../features/history/HistoryView';
@@ -31,12 +29,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   execution: {
     title: 'Execution control',
-    render: () => (
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        <ExecutionControl />
-        <ManualRun />
-      </Box>
-    ),
+    render: () => <ExecutionPanel />,
   },
   modes: { title: 'Analysis rounds', render: () => <ModeCards /> },
   positions: {

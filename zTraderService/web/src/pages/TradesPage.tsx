@@ -6,9 +6,10 @@ import { PageHeader } from '../components/PageHeader';
 import { Panel } from '../components/Panel';
 import { HistoryView } from '../features/history/HistoryView';
 import { PositionsTable } from '../features/positions/PositionsTable';
+import { TradeLog } from '../features/positions/TradeLog';
 
 export function TradesPage() {
-  const [tab, setTab] = useState<'positions' | 'history'>('positions');
+  const [tab, setTab] = useState<'positions' | 'log' | 'history'>('positions');
   return (
     <Box
       sx={{
@@ -29,19 +30,24 @@ export function TradesPage() {
       >
         <Tabs
           value={tab}
-          onChange={(_e, v: 'positions' | 'history') => {
+          onChange={(_e, v: 'positions' | 'log' | 'history') => {
             setTab(v);
           }}
           aria-label="Trades"
         >
           <Tab value="positions" label="Open positions" />
-          <Tab value="history" label="History (30 days)" />
+          <Tab value="log" label="Trade log (all)" />
+          <Tab value="history" label="Analytics (30 days)" />
         </Tabs>
       </Box>
       <Box sx={{ flex: 1, minHeight: 0, p: 2 }}>
         {tab === 'positions' ? (
           <Panel title="Open positions" dense>
             <PositionsTable />
+          </Panel>
+        ) : tab === 'log' ? (
+          <Panel title="Trade log · every instrument" dense>
+            <TradeLog />
           </Panel>
         ) : (
           <Panel title="Closed trades">

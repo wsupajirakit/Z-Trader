@@ -3,10 +3,11 @@ import { AccountModule } from '../account/account.module';
 import { AuditModule } from '../audit/audit.module';
 import { CtraderModule } from '../ctrader/ctrader.module';
 import { GoldModule } from '../gold/gold.module';
+import { TradesModule } from '../trades/trades.module';
 import { DashboardController } from './dashboard.controller';
 
 @Module({
-    imports: [GoldModule, CtraderModule, AuditModule, AccountModule],
+    imports: [GoldModule, CtraderModule, AuditModule, AccountModule, TradesModule],
     controllers: [DashboardController],
 })
 export class DashboardModule {}

@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Logger, Param, Post, Query, Req } from '@nestjs/common';
-import type { Request } from 'express';
+import { Body, Controller, Get, Logger, Param, Post, Query, Req, Res } from '@nestjs/common';
+import type { Request, Response } from 'express';
 import { AccountService } from '../account/account.service';
 import { AuditService } from '../audit/audit.service';
 import { CurrentSession, RequireRole } from '../common/auth/auth.decorators';
@@ -14,6 +14,10 @@ import { GoldActivityService } from '../gold/records/gold-activity.service';
 import { GoldArchiveService } from '../gold/records/gold-archive.service';
 import { GoldHistoryService } from '../gold/records/gold-history.service';
 import { toHttpError } from '../gold/http/http-errors';
+import type { CtOrder, CtPosition, CtReconcile } from '../trades/ctrader-payloads';
+import { isBuy } from '../trades/ctrader-payloads';
+import { QuotesStreamQuery, TradesQuery } from '../trades/dto/trades.dto';
+import { TradesService } from '../trades/trades.service';
 import {
     ActivityQuery,
     ArchiveFileParams,
@@ -50,6 +54,7 @@ export class DashboardController {
         private readonly instruments: GoldInstrumentService,
         private readonly audit: AuditService,
         private readonly account: AccountService,
+        private readonly trades: TradesService,
     ) {}
 
     // ---------------- reads (viewer) ----------------
@@ -105,25 +110,92 @@ export class DashboardController {
         }
     }
 
+    /**
+     * Open positions of every instrument (RUNNING: filled and live) and the bot's pending orders
+     * (WAITING: a limit or stop order that has not filled yet), from one cTrader reconcile.
+     */
     @Get('positions')
     async positions() {
         if (!this.ctrader.isAuthorized) return [];
+        const res = (await this.ctrader.getPositions()) as CtReconcile | null;
         // every instrument the bot knows (gold + FX); lots use each profile's unitsPerLot
-        const res = await this.ctrader.getPositions();
-        return ((res?.position ?? []) as any[])
-            .map((p) => ({ p, prof: this.instruments.profileBySymbolId(num(p.tradeData?.symbolId)) }))
-            .filter((x) => !!x.prof)
-            .map(({ p, prof }) => ({
-                positionId: num(p.positionId),
+        const known = <T extends CtPosition | CtOrder>(rows: T[] | undefined) =>
+            (rows ?? [])
+                .map((r) => ({ r, prof: this.instruments.profileBySymbolId(num(r.tradeData?.symbolId)) }))
+                .filter((x) => !!x.prof);
+        const running = known(res?.position).map(({ r: p, prof }) => ({
+            state: 'RUNNING' as const,
+            positionId: num(p.positionId),
+            symbol: prof!.key,
+            digits: prof!.digits,
+            side: isBuy(p.tradeData?.tradeSide) ? 'BUY' : 'SELL',
+            lots: num(p.tradeData?.volume) / (prof!.unitsPerLot * 100),
+            entry: num(p.price),
+            stopLoss: p.stopLoss ? num(p.stopLoss) : null,
+            takeProfit: p.takeProfit ? num(p.takeProfit) : null,
+            openedAt: num(p.tradeData?.openTimestamp) || null,
+        }));
+        const waiting = known(res?.order)
+            .filter(({ r }) => !r.closingOrder && (r.limitPrice || r.stopPrice))
+            .map(({ r: o, prof }) => ({
+                state: 'WAITING' as const,
+                positionId: num(o.orderId),
                 symbol: prof!.key,
                 digits: prof!.digits,
-                side: num(p.tradeData?.tradeSide) === 1 ? 'BUY' : 'SELL',
-                lots: num(p.tradeData?.volume) / (prof!.unitsPerLot * 100),
-                entry: num(p.price),
-                stopLoss: p.stopLoss ? num(p.stopLoss) : null,
-                takeProfit: p.takeProfit ? num(p.takeProfit) : null,
-                openedAt: num(p.tradeData?.openTimestamp) || null,
+                side: isBuy(o.tradeData?.tradeSide) ? 'BUY' : 'SELL',
+                lots: num(o.tradeData?.volume) / (prof!.unitsPerLot * 100),
+                entry: num(o.limitPrice || o.stopPrice),
+                orderType: o.limitPrice ? 'LIMIT' : 'STOP',
+                stopLoss: o.stopLoss ? num(o.stopLoss) : null,
+                takeProfit: o.takeProfit ? num(o.takeProfit) : null,
+                openedAt: num(o.tradeData?.openTimestamp) || null,
             }));
+        return [...running, ...waiting];
+    }
+
+    /** the trade ledger: every position of every instrument, open and closed, newest first */
+    @Get('trades')
+    async tradeLedger(@Query() q: TradesQuery) {
+        return this.trades.list(q);
+    }
+
+    /**
+     * Server-Sent Events: `quotes` {SYMBOL: {bid, ask, at}} for the given instruments, at most once a
+     * second and only when a price moved, plus a `: ping` comment every 15 s. A page showing open
+     * positions keeps one of these open instead of polling prices.
+     */
+    @Get('quotes/stream')
+    quotesStream(@Query() q: QuotesStreamQuery, @Req() req: Request, @Res() res: Response): void {
+        res.status(200);
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+        req.socket.setNoDelay(true);
+        res.write('retry: 3000\n\n');
+
+        this.automate.watchPrices(q.symbols);
+        let last = '';
+        let since = 0;
+        const tick = setInterval(() => {
+            if (res.writableEnded) return;
+            since += 1;
+            if (since % 60 === 0) this.automate.watchPrices(q.symbols);
+            const quotes = this.automate.quotes(q.symbols);
+            const body = JSON.stringify(quotes);
+            if (body !== last) {
+                last = body;
+                res.write(`event: quotes\ndata: ${body}\n\n`);
+            } else if (since % 15 === 0) {
+                res.write(': ping\n\n');
+            }
+        }, 1000);
+        tick.unref();
+        const stop = () => clearInterval(tick);
+        req.on('close', stop);
+        res.on('close', stop);
+        res.on('error', stop);
     }
 
     @Get('history')

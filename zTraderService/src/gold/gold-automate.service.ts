@@ -22,7 +22,17 @@ import {
     type RoundTrace,
 } from './records/round-context';
 import { INTERVAL_MS } from './domain/gold-modes';
-import { marketStatus } from './domain/market-hours';
+import { etParts, marketStatus } from './domain/market-hours';
+import {
+    fmtBkk,
+    fmtResume,
+    gateKind,
+    joinModes,
+    sessionBlock,
+    sessionGate,
+    type GateClosed,
+    type GateItem,
+} from './domain/session-gate';
 import { OnEvent } from '@nestjs/event-emitter';
 import { GoldAiService, GoldDecision, GoldSize } from './ai/gold-ai.service';
 import { GoldGeminiService, GoldAiAssist, GoldAiProposal } from './ai/gold-gemini.service';
@@ -39,8 +49,9 @@ import {
     seriesKey,
     usdPerUnitMovePerLot,
 } from './domain/instruments';
+import { duplicateOf, workingEntries, type ReconcileLike } from './domain/working-orders';
 import { errorMessage } from '../common/utils/errors';
-import { DomainError } from './domain/domain-error';
+import { DomainError, OrderSkipped } from './domain/domain-error';
 import { demoContext } from '../common/demo/demo-context';
 import { AI_STRICTNESS_LEVELS, type AiStrictness, STRICTNESS_MIN_AI_CONFIDENCE } from './ai/ai-strictness';
 
@@ -97,6 +108,10 @@ const PENDING_TTL_MS = 10 * 60_000; // decision goes stale after 10 minutes
 const TA_MAX_CONFIDENCE = 8; // max confidence the TA engine can actually produce (see gold-ta.service.ts confBase)
 const STALE_TICK_MS = 90_000; // market open but price unchanged for 90 s = silent subscription
 const SPOT_RESUB_COOLDOWN_MS = 60_000; // avoid re-subscribing on every tick
+/** how long a quotes viewer keeps an instrument's prices subscribed without renewing */
+const WATCH_PRICES_MS = 5 * 60_000;
+/** a new entry this close (in pips) to a working order or position on the same side is the same setup */
+const DUPLICATE_PIPS = 3;
 
 @Injectable()
 export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
@@ -120,6 +135,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     private lastHeartbeat = 0;
     private currentMode: GoldMode | null = null;
     private marketWasOpen = new Map<string, boolean>(); // key = instrument -> was that market open last tick (hours differ per instrument)
+    /** session gate per instrument:mode at the last tick; null = may trade. Cleared when the loop stops */
+    private gates = new Map<string, GateClosed | null>();
     // state/pending/running แยกตามตราสาร: key = `${instrument}:${mode}` — สลับตราสารแล้วของเดิมไม่หาย
     private running = new Set<string>();
     private state = new Map<string, ModeState>();
@@ -221,6 +238,33 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         return this.ticks.get(p.key) ?? null;
     }
 
+    /** instruments whose prices a viewer needs although the loop does not trade them (open positions); key -> until (ms) */
+    private watched = new Map<string, number>();
+
+    /**
+     * Keep live prices coming for these instruments for the next few minutes (the quotes stream
+     * renews it while a page shows positions), even when the loop is stopped or trades others.
+     */
+    watchPrices(keys: readonly string[]) {
+        const until = Date.now() + WATCH_PRICES_MS;
+        for (const key of keys) {
+            if (!isInstrumentKey(key)) continue;
+            const p = INSTRUMENTS[key];
+            this.watched.set(p.key, until);
+            if (!this.spotSubscribed.get(p.key)) void this.ensureSpotSubscriptionFor(p);
+        }
+    }
+
+    /** latest bid/ask per instrument key (null = no tick yet) */
+    quotes(keys: readonly string[]) {
+        return Object.fromEntries(
+            keys.map((k) => {
+                const t = this.ticks.get(k);
+                return [k, t ? { bid: t.bid, ask: t.ask, at: t.at } : null];
+            }),
+        );
+    }
+
     /**
      * ดูแล subscription ราคาสดให้มีชีวิตอยู่เสมอ
      *
@@ -236,7 +280,12 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             this.spotSubscribed.clear();
             return;
         }
-        for (const p of this.enabledInstruments()) {
+        const now = Date.now();
+        const watched = [...this.watched]
+            .filter(([key, until]) => until > now && isInstrumentKey(key))
+            .map(([key]) => INSTRUMENTS[key as InstrumentKey])
+            .filter((p) => !this.enabledInstruments().some((e) => e.key === p.key));
+        for (const p of [...this.enabledInstruments(), ...watched]) {
             await this.ensureSpotSubscriptionFor(p);
         }
     }
@@ -1505,6 +1554,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         const now = new Date();
 
         if (!this.isEnabled()) {
+            this.gates.clear(); // the next Start reports every gate that is closed at that moment
             this.heartbeat(now, null);
             return;
         }
@@ -1513,6 +1563,10 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         // ก่อนรองรับหลายตราสาร) — แต่ละตราสารมีชั่วโมงตลาด/สถานะแท่ง/guard ของตัวเอง
         // ไม่ปนกัน เพราะ state/running/pending ทุกตัวคีย์ด้วย `${instrument}:${mode}` อยู่แล้ว
         const waits: string[] = [];
+        const et = etParts(now);
+        const closedNow: Array<GateItem & { gate: GateClosed }> = [];
+        const openedNow: GateItem[] = [];
+        const noTrade: Array<GateItem & { gate: GateClosed }> = [];
         for (const prof of this.enabledInstruments()) {
             // ตลาดปิด = พักเฉพาะตราสารนี้ ตราสารอื่นเดินต่อได้ตามปกติ
             const mkt = marketStatus(now, prof.hours);
@@ -1545,6 +1599,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
 
             for (const mode of this.tradableModesFor(prof)) {
                 const tag = this.enabledInstruments().length > 1 ? `${prof.key}/${mode}` : mode;
+                const gate = this.trackGate(mode, prof, et, now, closedNow, openedNow);
                 if (this.running.has(this.sk(mode, prof))) {
                     waits.push(`${tag}: analyzing…`);
                     continue;
@@ -1564,19 +1619,85 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 // run once per bar, shortly after it opens (= previous bar just closed)
                 if (bucket > st.lastBarBucket && sinceBarOpenMs >= cfg.offsetSec * 1000) {
                     st.lastBarBucket = bucket;
-                    this.activity.push(
-                        'info',
-                        `${cfg.periodMin}m bar closed → starting a new analysis round`,
-                        `${prof.key}/${mode}`,
-                    );
+                    // a gated round still runs and logs its own "skipped:" outcome — it is not an analysis
+                    if (!gate) {
+                        this.activity.push(
+                            'info',
+                            `${cfg.periodMin}m bar closed → starting a new analysis round`,
+                            `${prof.key}/${mode}`,
+                        );
+                    }
                     this.launch(mode, prof);
+                } else if (gate) {
+                    noTrade.push({ inst: prof.key, mode, gate });
                 } else {
                     const leftMs = periodMs - sinceBarOpenMs;
                     waits.push(`${tag}: in ${this.fmtWait(leftMs)}`);
                 }
             }
         }
-        this.heartbeat(now, waits);
+        this.logGateChanges(closedNow, openedNow, now);
+        this.heartbeat(now, [...this.noTradeSummary(noTrade, now), ...waits]);
+    }
+
+    /**
+     * Session gate of one instrument/mode at this tick. A change since the last tick is collected
+     * so the tick writes one "NO TRADING" / "TRADING OPEN" line instead of a skip per round.
+     */
+    private trackGate(
+        mode: GoldMode,
+        p: InstrumentProfile,
+        et: { min: number; dow: number },
+        now: Date,
+        closedNow: Array<GateItem & { gate: GateClosed }>,
+        openedNow: GateItem[],
+    ): GateClosed | null {
+        const key = this.sk(mode, p);
+        const prev = this.gates.get(key);
+        const reason = sessionBlock(mode, p.session, et.min, et.dow);
+        if (!reason) {
+            if (prev) openedNow.push({ inst: p.key, mode });
+            this.gates.set(key, null);
+            return null;
+        }
+        if (prev && prev.reason === reason) return prev;
+        const gate = sessionGate(mode, p.session, p.hours, now) ?? { reason, resumesAt: null };
+        this.gates.set(key, gate);
+        closedNow.push({ inst: p.key, mode, gate });
+        return gate;
+    }
+
+    private logGateChanges(closedNow: Array<GateItem & { gate: GateClosed }>, openedNow: GateItem[], now: Date) {
+        const multi = this.enabledInstruments().length > 1;
+        const groups = new Map<string, { gate: GateClosed; items: GateItem[] }>();
+        for (const c of closedNow) {
+            const k = `${c.gate.reason}|${c.gate.resumesAt?.getTime() ?? ''}`;
+            const g = groups.get(k) ?? { gate: c.gate, items: [] };
+            g.items.push(c);
+            groups.set(k, g);
+        }
+        for (const { gate, items } of groups.values()) {
+            this.activity.push(
+                'warn',
+                `⏸ NO TRADING — ${gate.reason} · trading resumes ${fmtResume(gate.resumesAt, now)}`,
+                joinModes(items, multi),
+            );
+        }
+        if (openedNow.length) {
+            this.activity.push('ok', '▶ TRADING OPEN — new orders allowed again', joinModes(openedNow, multi));
+        }
+    }
+
+    /** heartbeat segments for gated modes: "⏸ NO TRADING until 21:00 BKK (news blackout): XAUUSD scalp+intraday" */
+    private noTradeSummary(noTrade: Array<GateItem & { gate: GateClosed }>, now: Date): string[] {
+        const multi = this.enabledInstruments().length > 1;
+        const groups = new Map<string, GateItem[]>();
+        for (const n of noTrade) {
+            const until = n.gate.resumesAt ? fmtBkk(n.gate.resumesAt, now) : 'later';
+            const k = `⏸ NO TRADING until ${until} (${gateKind(n.gate.reason)})`;
+            groups.set(k, [...(groups.get(k) ?? []), n]);
+        }
+        return [...groups].map(([head, items]) => `${head}: ${joinModes(items, multi)}`);
     }
 
     private fmtWait(ms: number): string {
@@ -2046,6 +2167,10 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             await this.notify(mode, decision, `ORDER SENT (${uuid})`, p);
             return (archResult = finish(decision, `order sent: ${uuid}`));
         } catch (e) {
+            if (e instanceof OrderSkipped) {
+                this.logger.log(`[${p.key}/${mode}] skipped: ${e.message}`);
+                return (archResult = finish(st.lastDecision, `skipped: ${e.message}`));
+            }
             st.lastError = errorMessage(e);
             this.logger.error(`[${mode}] ${errorMessage(e)}`);
             await this.telegramService.notifyError(`[${p.key} ${mode}] ${errorMessage(e)}`);
@@ -2320,26 +2445,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * หน้าต่าง/blackout มาจาก profile.session (นาที ET) — ของทองเท่าค่าเดิมทุกตัว
      */
     private sessionGuard(mode: GoldMode, p: InstrumentProfile = this.profile): string | null {
-        if (mode === 'swing' || mode === 'position') return null; // higher TFs trade any session
         const { min, dow } = this.etInfo();
-        const hhmm = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-        for (const b of p.session.blackouts) {
-            if (min >= b.from && min < b.to) return b.label_th;
-        }
-        if (p.session.fridayCutoff != null && dow === 5 && min >= p.session.fridayCutoff) {
-            return 'Friday afternoon ET — no new trades before the weekly close';
-        }
-        if (mode === 'scalp') {
-            const inWindow = p.session.scalpWindows.some(([a, b]) => min >= a && min < b);
-            if (!inWindow) {
-                return `outside the scalp window (${p.session.scalpWindows.map(([a, b]) => `${hhmm(a)}-${hhmm(b)} ET`).join(' / ')})`;
-            }
-        }
-        if (mode === 'intraday') {
-            const [a, b] = p.session.intradayWindow;
-            if (!(min >= a && min < b)) return `outside the intraday window (${hhmm(a)}–${hhmm(b)} ET)`;
-        }
-        return null;
+        return sessionBlock(mode, p.session, min, dow);
     }
 
     /** ไม้ที่เปิดอยู่ของตราสารนี้ (นับตาม symbolId) — lots คำนวณจาก unitsPerLot ของตราสาร */
@@ -2375,8 +2482,9 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             }
             return { count: mine.length + pending.length, summary: parts.join(' | ') };
         } catch (e) {
-            this.logger.warn(`getPositions failed (${errorMessage(e)}) — assuming 0 open`);
-            return { count: 0, summary: 'unknown (reconcile failed)' };
+            // unknown exposure must not read as "none open": the round is skipped instead
+            this.logger.warn(`getPositions failed (${errorMessage(e)}) — exposure unknown, no new orders`);
+            return { count: Number.MAX_SAFE_INTEGER, summary: 'unknown (reconcile failed)' };
         }
     }
 
@@ -2393,8 +2501,10 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 list.filter((x) => !!this.instruments.profileBySymbolId(Number(x.tradeData?.symbolId ?? 0))).length;
             return known((res?.position ?? []) as any[]) + known((res?.order ?? []) as any[]);
         } catch (e) {
-            this.logger.warn(`getOpenPositionsAllInstruments failed (${errorMessage(e)}) — assuming 0`);
-            return 0;
+            this.logger.warn(
+                `getOpenPositionsAllInstruments failed (${errorMessage(e)}) — exposure unknown, no new orders`,
+            );
+            return Number.MAX_SAFE_INTEGER;
         }
     }
 
@@ -2611,20 +2721,42 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     ): Promise<string> {
         // one working pending order per mode per instrument — a new round REPLACES the previous
         // order instead of stacking on top of it (post-mortem: stacked limits
-        // filled together and multiplied one loss by 3)
+        // filled together and multiplied one loss by 3). Fail closed: if the broker cannot be
+        // read or the old order cannot be cancelled, no new order goes out this round.
+        let rec: ReconcileLike | null;
         try {
-            const rec = await this.ctraderService.getPositions(); // reconcile: positions + orders
-            const stale = ((rec?.order ?? []) as any[]).filter(
-                (o) =>
-                    Number(o.tradeData?.symbolId ?? 0) === symbolId &&
-                    String(o.clientOrderId ?? '').startsWith(`gold-${mode}-`),
-            );
-            for (const o of stale) {
-                await this.ctraderService.cancelOrder(Number(o.orderId));
-                this.logger.log(`[${mode}] cancelled stale pending order ${o.orderId} (replaced by new round)`);
-            }
+            rec = (await this.ctraderService.getPositions()) as ReconcileLike | null; // reconcile: positions + orders
         } catch (e) {
-            this.logger.warn(`stale-order cleanup failed: ${errorMessage(e)}`);
+            throw new DomainError(`no order: could not read working orders (${errorMessage(e)})`);
+        }
+        const stale = workingEntries(rec, symbolId).filter(
+            (w) => w.kind === 'pending' && w.clientOrderId.startsWith(`gold-${mode}-`),
+        );
+        for (const w of stale) {
+            try {
+                await this.ctraderService.cancelOrder(w.id);
+            } catch (e) {
+                throw new DomainError(
+                    `no order: could not cancel the previous ${mode} order ${w.id} (${errorMessage(e)})`,
+                );
+            }
+            this.logger.log(`[${mode}] cancelled stale pending order ${w.id} (replaced by new round)`);
+        }
+        // whatever is still working (other modes, or orders the broker returned without our id)
+        // must not already hold this same setup
+        if (d.entry != null) {
+            const left = workingEntries(rec, symbolId).filter((w) => !stale.some((x) => x.id === w.id));
+            const dup = duplicateOf(
+                left,
+                d.order_type.startsWith('BUY') ? 'BUY' : 'SELL',
+                d.entry,
+                p.pip * DUPLICATE_PIPS,
+            );
+            if (dup) {
+                throw new OrderSkipped(
+                    `the same setup is already working (${dup.kind} ${dup.id} ${dup.side} @ ${dup.price})`,
+                );
+            }
         }
 
         const uuid = `gold-${mode}-${randomUUID()}`;

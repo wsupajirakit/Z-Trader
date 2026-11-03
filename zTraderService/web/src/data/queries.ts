@@ -47,6 +47,14 @@ export const positionsQuery = queryOptions({
   refetchInterval: POLL_MS.positions,
 });
 
+/** the trade ledger, first page; older pages load on demand */
+export const tradesQuery = (status: 'open' | 'closed' | 'all') =>
+  queryOptions({
+    queryKey: qk.dashboard.trades(status),
+    queryFn: ({ signal }) => dashboardApi.trades({ status }, signal),
+    refetchInterval: POLL_MS.trades,
+  });
+
 export const accountQuery = queryOptions({
   queryKey: qk.account,
   queryFn: ({ signal }) => accountApi.summary(signal),

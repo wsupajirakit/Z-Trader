@@ -38,6 +38,7 @@ export const qk = {
     history: (instrument: string, days: number) =>
       ['dashboard', 'history', instrument, days] as const,
     positionsAll: ['dashboard', 'positions'] as const,
+    trades: (status: string) => ['dashboard', 'trades', status] as const,
     positions: (instrument: string) =>
       ['dashboard', 'positions', instrument] as const,
     settings: ['dashboard', 'settings'] as const,

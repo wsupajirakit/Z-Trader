@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GenerateContentParameters, GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { GoldDecision, GoldSize } from './gold-ai.service';
 import { GoldMode } from '../data/gold-data.service';
 import { GoldModeSpec, INTERVAL_MS } from '../domain/gold-modes';
@@ -270,6 +270,34 @@ interface RefLevel {
     v: number;
 }
 
+/** model ids that are not chat models: media, speech, embeddings, agents */
+const NOT_FOR_TRADING = /image|tts|transcribe|embedding|robotics|computer-use|vision|customtools|omni/i;
+
+/**
+ * Every Gemini model this app can drive, straight from Google's ListModels (nothing hardcoded):
+ * generateContent support, Gemini 3 or newer (thinking_level), no media or agent variants.
+ * Newest first. The whole list is returned: each entry is verified by test/ai-models.live.js.
+ */
+export async function geminiCandidates(apiKey: string): Promise<Array<{ id: string; label: string; out: number }>> {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${apiKey}`);
+    if (!res.ok) throw new Error(`ListModels ${res.status}`);
+    const data: any = await res.json();
+    const version = (id: string) => parseFloat(id.slice('gemini-'.length)); // "3.5-flash" -> 3.5, "4-argon" -> 4
+    return (data.models ?? [])
+        .filter((m: any) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
+        .map((m: any) => ({
+            id: String(m.name ?? '').replace(/^models\//, ''),
+            label: String(m.displayName ?? ''),
+            out: Number(m.outputTokenLimit ?? 0),
+        }))
+        .filter((m: { id: string }) => {
+            if (!m.id.startsWith('gemini-') || NOT_FOR_TRADING.test(m.id)) return false;
+            const ver = version(m.id);
+            return Number.isFinite(ver) && ver >= 3;
+        })
+        .sort((a: { id: string }, b: { id: string }) => version(b.id) - version(a.id) || a.id.localeCompare(b.id));
+}
+
 @Injectable()
 export class GoldGeminiService {
     private readonly logger = new Logger(GoldGeminiService.name);
@@ -403,33 +431,15 @@ export class GoldGeminiService {
      * กรองเอาเฉพาะ Gemini 3.x ขึ้นไป เพราะ:
      *   - รองรับ thinking_level ครบทุกตัว (2.5 มีเงื่อนไขต่างออกไป)
      *   - ตัดพวก image / tts / transcribe / robotics / computer-use / embedding ที่ใช้เทรดไม่ได้
-     * เรียงรุ่นใหม่ไว้บน · จำกัดจำนวนให้เลือกง่าย (flash หลายตัว + pro)
+     * เรียงรุ่นใหม่ไว้บน · แสดงครบทุกรุ่นที่ใช้ได้ (เดิมตัดเหลือ 6 ตัว ทำให้รุ่น pro หลุดจากรายการ)
+     * ตัวกรองอยู่ที่ geminiCandidates() · ทดสอบจริงทุกรุ่นด้วย test/ai-models.live.js
      */
     async listModels(): Promise<Array<{ id: string; label: string; out: number }>> {
         // demo role: no request to the provider; the last real list (if any) is shown
         if (demoContext.active) return this.modelsCache?.list ?? [];
         if (this.modelsCache && Date.now() - this.modelsCache.at < 3_600_000) return this.modelsCache.list;
         if (!this.apiKey) return [];
-        const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=${this.apiKey}`,
-        );
-        if (!res.ok) throw new Error(`ListModels ${res.status}`);
-        const data: any = await res.json();
-        const BAD = /image|tts|transcribe|embedding|robotics|computer-use|vision|customtools|omni/i;
-        const list = (data.models ?? [])
-            .filter((m: any) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
-            .map((m: any) => ({
-                id: String(m.name ?? '').replace(/^models\//, ''),
-                label: String(m.displayName ?? ''),
-                out: Number(m.outputTokenLimit ?? 0),
-            }))
-            .filter((m: { id: string }) => {
-                if (!m.id.startsWith('gemini-') || BAD.test(m.id)) return false;
-                const ver = parseFloat(m.id.slice('gemini-'.length)); // "3.5-flash" -> 3.5
-                return Number.isFinite(ver) && ver >= 3;
-            })
-            .sort((a: any, b: any) => parseFloat(b.id.slice(7)) - parseFloat(a.id.slice(7)))
-            .slice(0, 6);
+        const list = await geminiCandidates(this.apiKey);
         this.modelsCache = { at: Date.now(), list };
         return list;
     }
@@ -506,8 +516,8 @@ export class GoldGeminiService {
         const abort = new AbortController();
         const timer = setTimeout(() => abort.abort(), cfg.timeout_ms);
         try {
-            const res = await this.withTimeout(
-                this.getClient().models.generateContent({
+            const res = await this.generate(
+                {
                     model: cfg.model,
                     contents: prompt,
                     config: {
@@ -521,7 +531,7 @@ export class GoldGeminiService {
                         thinkingConfig: { thinkingLevel: this.thinkingLevel(cfg.thinking_level) },
                         abortSignal: abort.signal,
                     },
-                }),
+                },
                 cfg.timeout_ms,
             );
 
@@ -602,8 +612,8 @@ export class GoldGeminiService {
         const abort = new AbortController();
         const timer = setTimeout(() => abort.abort(), cfg.timeout_ms);
         try {
-            const res = await this.withTimeout(
-                this.getClient().models.generateContent({
+            const res = await this.generate(
+                {
                     model: cfg.model,
                     contents: prompt,
                     config: {
@@ -617,7 +627,7 @@ export class GoldGeminiService {
                         thinkingConfig: { thinkingLevel: this.thinkingLevel(cfg.thinking_level) },
                         abortSignal: abort.signal,
                     },
-                }),
+                },
                 cfg.timeout_ms,
             );
 
@@ -1579,6 +1589,36 @@ export class GoldGeminiService {
             min: (parseInt(get('hour'), 10) % 24) * 60 + parseInt(get('minute'), 10),
             dow: dowMap[get('weekday')] ?? 0,
         };
+    }
+
+    /**
+     * generateContent with the app's timeout. Some models reject thinking level MINIMAL with a 400
+     * (measured 3 Nov 2026: gemini-4-argon, 3.8-flash, 3.7-flash, 3.1-pro-preview). Such a model is
+     * asked again at LOW, the nearest level it accepts, and remembered so later rounds go straight
+     * to LOW. No model list is hardcoded: the provider's own answer decides.
+     */
+    private readonly noMinimalThinking = new Set<string>();
+
+    private async generate(params: GenerateContentParameters, timeoutMs: number) {
+        const thinking = params.config?.thinkingConfig;
+        if (thinking?.thinkingLevel === ThinkingLevel.MINIMAL && this.noMinimalThinking.has(params.model)) {
+            params = { ...params, config: { ...params.config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } };
+        }
+        try {
+            return await this.withTimeout(this.getClient().models.generateContent(params), timeoutMs);
+        } catch (e: any) {
+            const minimalRefused =
+                params.config?.thinkingConfig?.thinkingLevel === ThinkingLevel.MINIMAL &&
+                /thinking level minimal is not supported/i.test(String(e?.message ?? e));
+            if (!minimalRefused) throw e;
+            this.noMinimalThinking.add(params.model);
+            this.logger.warn(`${params.model} does not support thinking level minimal — using low for this model`);
+            const retry = {
+                ...params,
+                config: { ...params.config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } },
+            };
+            return this.withTimeout(this.getClient().models.generateContent(retry), timeoutMs);
+        }
     }
 
     private withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {

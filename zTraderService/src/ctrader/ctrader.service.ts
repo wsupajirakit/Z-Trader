@@ -394,6 +394,54 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
+    /** close the whole position at market (volume in 0.01 units, as cTrader reports it) */
+    public async closePosition(positionId: number, volume: number) {
+        if (!this.isAccountAuthorized) throw new Error('Account not authorized');
+        return this.request<any>('ProtoOAClosePositionReq', {
+            ctidTraderAccountId: this._activeAccountId,
+            positionId,
+            volume,
+        });
+    }
+
+    /**
+     * Flatten the account: close every open position at market and cancel every pending limit/stop
+     * order (closing SL/TP orders go with their positions). Each failure is reported, never thrown,
+     * so one refusal does not leave the rest open.
+     */
+    public async closeAll(): Promise<{ closed: number[]; cancelled: number[]; failed: string[] }> {
+        if (!this.isAccountAuthorized) throw new Error('Account not authorized');
+        const toNum = (v: unknown) =>
+            typeof v === 'number' ? v : Number((v as { toString(): string } | null)?.toString?.() ?? 0);
+        const res = await this.getPositions();
+        const closed: number[] = [];
+        const cancelled: number[] = [];
+        const failed: string[] = [];
+        for (const o of (res?.order ?? []) as any[]) {
+            if (o.closingOrder) continue;
+            const id = toNum(o.orderId);
+            try {
+                await this.cancelOrder(id);
+                cancelled.push(id);
+            } catch (e) {
+                failed.push(`order ${id}: ${errorMessage(e)}`);
+            }
+        }
+        for (const p of (res?.position ?? []) as any[]) {
+            const id = toNum(p.positionId);
+            try {
+                await this.closePosition(id, toNum(p.tradeData?.volume));
+                closed.push(id);
+            } catch (e) {
+                failed.push(`position ${id}: ${errorMessage(e)}`);
+            }
+        }
+        this.logger.warn(
+            `closeAll: closed ${closed.length} positions, cancelled ${cancelled.length} orders, ${failed.length} failed`,
+        );
+        return { closed, cancelled, failed };
+    }
+
     /**
      * Sends a request and waits for its answer. Historical-data requests (deal lists, trendbars) are
      * spaced by a shared limiter and retried with backoff if cTrader still answers "rate limited",
@@ -506,6 +554,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
             ProtoOADealListByPositionIdRes: 2180,
             ProtoOACancelOrderReq: 2109,
             ProtoOACancelOrderRes: 2110,
+            ProtoOAClosePositionReq: 2111,
             ProtoOADealListReq: 2133,
             ProtoOADealListRes: 2134,
             ProtoHeartbeatEvent: 51,

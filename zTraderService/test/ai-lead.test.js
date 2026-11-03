@@ -336,6 +336,28 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
     t('system ใช้ playbook ของ intraday EURUSD',
         EURUSD_PROFILE.modes.intraday.playbook.every((p) => eusys.includes(p.slice(0, 40))));
 
+    console.log('\n=== 8. รุ่นที่ไม่รับ thinking minimal → ถามซ้ำด้วย low แล้วจำไว้ ===');
+    {
+        const levels = [];
+        const svc = new GoldGeminiService({ get: (k, d) => ({ ...env, GOLD_AI_THINKING: 'minimal', GEMINI_MODEL: 'gemini-x' })[k] ?? d });
+        svc.logger = { log: () => {}, warn: (m) => logs.push(['warn', m]), error: (m) => logs.push(['error', m]) };
+        const client = new GoogleGenAI({ apiKey: 'fake-key' });
+        client.models.generateContent = async (args) => {
+            const level = args.config.thinkingConfig.thinkingLevel;
+            levels.push(level);
+            if (level === 'MINIMAL') {
+                throw new Error('{"error":{"code":400,"message":"Thinking level MINIMAL is not supported for this model. Please retry with other thinking level.","status":"INVALID_ARGUMENT"}}');
+            }
+            return { text: JSON.stringify(goodProposal), candidates: [{ finishReason: 'STOP' }] };
+        };
+        svc.client = client;
+        const first = await svc.propose('scalp', series, runtime, { profile: XAUUSD_PROFILE, news, now: new Date(NOW) });
+        t('รอบแรก: minimal โดนปฏิเสธ → ได้คำตอบจากการถามซ้ำด้วย low', first !== null && levels.join(',') === 'MINIMAL,LOW', levels.join(','));
+        levels.length = 0;
+        await svc.propose('scalp', series, runtime, { profile: XAUUSD_PROFILE, news, now: new Date(NOW) });
+        t('รอบถัดไป: จำรุ่นไว้ ถามด้วย low ทันที (ไม่เสีย call พัง)', levels.join(',') === 'LOW', levels.join(','));
+    }
+
     console.log(`\n${fail === 0 ? '✅ AI LEAD ผ่านหมด' : '❌ AI LEAD พัง'} ${pass}/${pass + fail}`);
     process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('TEST CRASH', e); process.exit(1); });

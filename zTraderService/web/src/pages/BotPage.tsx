@@ -8,8 +8,7 @@ import { Panel } from '../components/Panel';
 import { statusQuery } from '../data/queries';
 import { ActivityLogView } from '../features/activity/ActivityLogView';
 import { AiSettings } from '../features/ai/AiSettings';
-import { ExecutionControl } from '../features/bot/ExecutionControl';
-import { ManualRun } from '../features/bot/ManualRun';
+import { ExecutionPanel } from '../features/bot/ExecutionPanel';
 import { ModeCards } from '../features/bot/ModeCards';
 import { DailyStopCard } from '../features/risk/DailyStopCard';
 import { RiskProfiles } from '../features/risk/RiskProfiles';
@@ -71,10 +70,7 @@ export function BotPage() {
             }}
           >
             <Panel title="Execution control" scroll={false}>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <ExecutionControl />
-                <ManualRun />
-              </Box>
+              <ExecutionPanel />
             </Panel>
             <Panel title="Analysis rounds" scroll={false}>
               <ModeCards />
