@@ -188,8 +188,10 @@ over the resource network.
    compose file `/docker-compose.yml`.
 2. **Environment variables.** Coolify generates these on the first deploy and keeps them; leave them alone:
    `SERVICE_PASSWORD_64_MONGOROOT`, `SERVICE_PASSWORD_64_MONGOAPP` (database passwords, letters and digits
-   only, so they are safe in the MongoDB URI), `SERVICE_HEX_64_APIKEY` (machine API key shared by `service`
-   and `actor`) and `SERVICE_URL_SERVICE_6500` (the generated domain). Set these yourself:
+   only, so they are safe in the MongoDB URI), `SERVICE_PASSWORD_64_APIKEY` (machine API key shared by
+   `service` and `actor`) and `SERVICE_URL_SERVICE_6500` (the generated domain). After the first load of the
+   compose file, open Environment Variables and check that each `SERVICE_*` value is filled in — an empty
+   `SERVICE_PASSWORD_64_APIKEY` makes `API_KEY` empty and the app refuses to boot. Set these yourself:
 
    | Variable | Required | Value |
    |---|---|---|
@@ -283,3 +285,4 @@ To go back to DEMO, set `CTRADER_ACCOUNT_MODE=DEMO` (or remove both variables) a
 | login works on http://127.0.0.1 but not behind the proxy | set `TRUST_PROXY=1`                                                                           |
 | `dashboard bundle not found`                             | the image was built without `web/` (check `.dockerignore`)                                    |
 | a tuning variable seems ignored                          | compose passes it only when it's set. Uncomment it in `.env.compose`, then run `dc up -d`     |
+| Coolify: `container service-… is unhealthy` seconds after `Started`, `dependency failed to start` | the `service` process exited (Docker marks a stopped container unhealthy; a probe failing inside the 90 s start period never does). Read its own log: `docker ps -a \| grep service-` then `docker logs <container>`. The usual line is `Invalid environment: …` — most often an empty `API_KEY` because the `SERVICE_PASSWORD_64_APIKEY` magic variable was not generated (fill it in Coolify's Environment Variables, `openssl rand -hex 32`), or `BOOTSTRAP_ADMIN_*` set only one of the two / password shorter than 9, or `SESSION_COOKIE_SECURE` not one of `auto`/`true`/`false` |
