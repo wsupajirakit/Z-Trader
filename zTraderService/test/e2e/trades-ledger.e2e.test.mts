@@ -17,19 +17,60 @@ const { OrderSchema } = require(`${DIST}/orders/schemas/order.schema`);
 
 const XAU_OPEN = {
     executionType: 'ORDER_FILLED',
-    deal: { dealId: '955237120', positionId: '691427255', symbolId: '41', tradeSide: 'SELL', volume: '200', filledVolume: '200', executionPrice: 3989.68, executionTimestamp: '1793352539437', moneyDigits: 2, dealStatus: 'FILLED' },
+    deal: {
+        dealId: '955237120',
+        positionId: '691427255',
+        symbolId: '41',
+        tradeSide: 'SELL',
+        volume: '200',
+        filledVolume: '200',
+        executionPrice: 3989.68,
+        executionTimestamp: '1793352539437',
+        moneyDigits: 2,
+        dealStatus: 'FILLED',
+    },
     order: { orderType: 'MARKET', closingOrder: false },
     position: { positionId: '691427255', price: 3989.68, positionStatus: 'POSITION_STATUS_OPEN' },
 };
 const XAU_CLOSE_TP = {
     executionType: 'ORDER_FILLED',
-    deal: { dealId: '955247498', positionId: '691427255', symbolId: '41', tradeSide: 'BUY', volume: '200', filledVolume: '200', executionPrice: 3984.64, executionTimestamp: '1793355112573', moneyDigits: 2, dealStatus: 'FILLED', closePositionDetail: { entryPrice: 3989.68, grossProfit: '1008', swap: '0', commission: '-48', closedVolume: '200', moneyDigits: 2 } },
+    deal: {
+        dealId: '955247498',
+        positionId: '691427255',
+        symbolId: '41',
+        tradeSide: 'BUY',
+        volume: '200',
+        filledVolume: '200',
+        executionPrice: 3984.64,
+        executionTimestamp: '1793355112573',
+        moneyDigits: 2,
+        dealStatus: 'FILLED',
+        closePositionDetail: {
+            entryPrice: 3989.68,
+            grossProfit: '1008',
+            swap: '0',
+            commission: '-48',
+            closedVolume: '200',
+            moneyDigits: 2,
+        },
+    },
     order: { orderType: 'STOP_LOSS_TAKE_PROFIT', closingOrder: true, limitPrice: 3984.68, stopPrice: 3993.68 },
     position: { positionId: '691427255', price: 0, positionStatus: 'POSITION_STATUS_CLOSED' },
 };
 const EUR_OPEN = {
     executionType: 'ORDER_FILLED',
-    deal: { dealId: '956242466', positionId: '692085525', symbolId: '1', tradeSide: 'BUY', volume: '14300000', filledVolume: '14300000', executionPrice: 1.11969, executionTimestamp: '1793691967354', moneyDigits: 2, dealStatus: 'FILLED' },
+    deal: {
+        dealId: '956242466',
+        positionId: '692085525',
+        symbolId: '1',
+        tradeSide: 'BUY',
+        volume: '14300000',
+        filledVolume: '14300000',
+        executionPrice: 1.11969,
+        executionTimestamp: '1793691967354',
+        moneyDigits: 2,
+        dealStatus: 'FILLED',
+    },
     order: { orderType: 'LIMIT', closingOrder: false, limitPrice: 1.1197 },
     position: { positionId: '692085525', price: 1.11969, positionStatus: 'POSITION_STATUS_OPEN' },
 };
@@ -44,7 +85,13 @@ describe('trade ledger', () => {
     let conn: any;
     let ledger: any;
     let trades: any;
-    let ctrader: { isAuthorized: boolean; positions: unknown[]; deals: unknown[]; getPositions: () => Promise<unknown>; getDealList: () => Promise<unknown> };
+    let ctrader: {
+        isAuthorized: boolean;
+        positions: unknown[];
+        deals: unknown[];
+        getPositions: () => Promise<unknown>;
+        getDealList: () => Promise<unknown>;
+    };
 
     before(async () => {
         mongo = process.env.TEST_MONGO_URI ? null : await MongoMemoryServer.create();
@@ -64,8 +111,12 @@ describe('trade ledger', () => {
             isAuthorized: true,
             positions: [],
             deals: [],
-            async getPositions() { return { position: this.positions }; },
-            async getDealList() { return { deal: this.deals }; },
+            getPositions() {
+                return { position: this.positions };
+            },
+            getDealList() {
+                return { deal: this.deals };
+            },
         };
         ledger = new TradesService(trades, conn.model('Order', OrderSchema), ctrader, {
             profileBySymbolId: (id: number) => PROFILES[id] ?? null,
@@ -123,7 +174,10 @@ describe('trade ledger', () => {
         await ledger.onExecution(XAU_CLOSE_TP);
         await ledger.onExecution(EUR_OPEN);
         const out = await ledger.list({ status: 'all' });
-        assert.deepEqual(out.trades.map((t: { symbol: string }) => t.symbol), ['EURUSD', 'XAUUSD']);
+        assert.deepEqual(
+            out.trades.map((t: { symbol: string }) => t.symbol),
+            ['EURUSD', 'XAUUSD'],
+        );
         assert.equal(out.trades[0].closeDealIds, undefined);
         assert.deepEqual(out.summary, { open: 1, closed: 1, wins: 1, net_usd: 9.6, gross_usd: 10.08 });
     });

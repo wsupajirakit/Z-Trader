@@ -280,7 +280,6 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
             ['Price is in the pullback zone but no reversal bar has confirmed yet (swing #2) — wait', 'await-reversal-bar'],
             ['4H direction (up) conflicts with the 1d regime (price below EMA200(1d) 4306.48) — transition phase, no trade', 'tf-regime-conflict'],
             ['Realistic target (avoiding round numbers/magnets) gives R:R 0.78 < threshold 2 — not worth it (playbook swing #2)', 'rr-just-below'],
-            ['A bar closed outside the range but RVOL 1.18 < 1.2 — breakout lacks force, volume not supportive (ORB evidence)', 'rvol-just-below'],
             ['Price already past the pullback zone by 103.22 (1.1×ATR) — structure broken, wait for a new leg', 'past-zone'],
         ];
         for (const [reason, id] of REAL) {
@@ -299,11 +298,11 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
             t(`ไม่เฉียด: ${r.slice(0, 38)}…`, c.near_miss === false && c.near_miss_rule === null);
         }
         t('ปิดกฎด้วย enabled:false ได้', (() => {
-            const rule = NEAR_MISS_RULES.find(x => x.id === 'rvol-just-below');
+            const rule = NEAR_MISS_RULES.find(x => x.id === 'rr-just-below');
             rule.enabled = false;
-            const off = classifyNoTrade('มีแท่งปิดนอกกรอบแต่ RVOL 1.18 < 1.2 — break ไร้แรง');
+            const off = classifyNoTrade('Realistic target (avoiding round numbers/magnets) gives R:R 0.78 < threshold 2 — not worth it');
             rule.enabled = undefined;
-            const on = classifyNoTrade('มีแท่งปิดนอกกรอบแต่ RVOL 1.18 < 1.2 — break ไร้แรง');
+            const on = classifyNoTrade('Realistic target (avoiding round numbers/magnets) gives R:R 0.78 < threshold 2 — not worth it');
             return off.near_miss === false && on.near_miss === true;
         })());
         t('ทุกกฎมี id / why_th / match ครบ',
@@ -316,7 +315,7 @@ function fakeAuto(overrides = {}, tick = { bid: 4001, ask: 4001.2, at: Date.now(
             x.goldGeminiService = { config: { has_key: true }, apiKey: 'k' };
             return x.shouldAskAiForSetup(dec).ask;
         };
-        const near = { order_type: 'NO_TRADE', near_miss: true, near_miss_rule: 'rvol-just-below' };
+        const near = { order_type: 'NO_TRADE', near_miss: true, near_miss_rule: 'rr-just-below' };
         const none = { order_type: 'NO_TRADE', near_miss: false };
         t('ค่าตั้งต้น = near_miss', fakeAuto({}).aiGate() === 'near_miss');
         t('ค่ามั่ว → ตกกลับเป็น near_miss', fakeAuto({ GOLD_AI_GATE: 'ลุย' }).aiGate() === 'near_miss');

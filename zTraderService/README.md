@@ -6,7 +6,9 @@ service trades a **DEMO** account by default. LIVE needs two explicit switches (
 
 - **TA engine.** A rule-based engine computes each decision in code. It runs per mode (scalp, intraday,
   swing, position) on cTrader trendbars, plus companion series from Yahoo Finance (DXY, US10Y, VIX, …) and RSS
-  headlines. Each mode has its own playbook, minimum R:R, session windows and order TTL.
+  headlines. Each mode has its own playbook, minimum R:R, session windows and order TTL. The Asian-range break
+  setups enter *with* the break (a STOP past the closing bar), London open only — the measurement behind that
+  is in [docs/breakout-entry.md](docs/breakout-entry.md).
 - **Optional AI, under rails.** The decision mode is chosen on the dashboard: *TA only*, *TA → AI confirm*
   (Gemini confirms, adjusts or vetoes a TA setup), *TA + AI lead* (Gemini also proposes a setup when TA finds
   none, at half size or less, through stricter checks) or *AI only* (the AI proposes every trade; Gemini, or
@@ -197,6 +199,10 @@ npm run typecheck && npm run lint
 | `test/e2e/chart.e2e.test.mts` | Chart sources, bars and the SSE stream (shared upstream, statuses), validation, session-only access. |
 | `test/e2e/actor-bridge*.e2e.test.mts` | The Actor bridge: viewer reads, operator start/stop with CSRF and audit, Actor down or unconfigured. |
 | `test/e2e/demo-role.e2e.test.mts` | The demo role: every screen reads, every write simulated and nothing persisted, a parked decision cannot be fired, CSRF still required, sandboxed run/analyze in each AI mode with no AI, broker, order or Telegram call, sink guards, and an operator unaffected. |
+| `test/breakout-ta.test.js` | The Asian-range break is a STOP past the closing bar with the SL beyond the broken edge (scalp #2, intraday #2); a close that has run too far is not chased; RVOL adds confidence and never vetoes. |
+| `test/breakout-entry.test.js` | `placeOrder` for STOP entries: a STOP while the market is below the level, market when already a little through, skipped past 25% of the SL distance, a stale tick cannot vouch for the market, one breakout trade per side per day. |
+| `test/ctrader-watchdog.test.js` | Against a local stub broker: a socket that never authorizes is dropped and retried, a sign-in error is logged and retried with backoff, a healthy sign-in stays up, a token-invalidated event reconnects. |
+| `test/session-gate.test.js` | Session windows (scalp 02–05 ET, intraday 02:30–07:00 ET, blackouts, Friday cutoff), when trading resumes, and the one-line NO TRADING / TRADING OPEN log. |
 | `test/tv-protocol.test.js` | TradingView frame encoding and message parsing. |
 | `test/history-limiter.test.js`, `test/deal-cache.test.js` | Request spacing, backoff, rate-limit detection, the shared single-flight deal cache, and the daily-stop / cooldown guards failing closed. |
 | `test/round-context.test.js` | `config_hash` stability and sensitivity, and that credentials never reach a record. |
@@ -251,6 +257,7 @@ Every key is listed and commented in [.env.example](.env.example). The ones that
 - HTTP and socket.io contract, roles, error shape: [docs/api.md](docs/api.md)
 - Dashboard UI: borrowed design vs. our own code: [docs/ui.md](docs/ui.md)
 - Round and trade records for backtests (configuration snapshot, `config_hash`): [docs/round-records.md](docs/round-records.md)
+- Why the range-break setups enter with the break, with the 60-day replay: [docs/breakout-entry.md](docs/breakout-entry.md)
 
 ## Known limitations
 

@@ -9,8 +9,8 @@ import { errorMessage } from '../../common/utils/errors';
 /**
  * Rule-based TA engine — implements the mode playbooks from gold.py/XAU_AUTOMATE
  * directly on the enriched bars (no AI call):
- *   scalp    : liquidity sweep + Asian-range break-retest on 5m (15m = context)
- *   intraday : Asian range break (STOP) / retest (LIMIT), 1h = direction TF
+ *   scalp    : liquidity sweep + Asian-range break on 5m, entered WITH the break (15m = context)
+ *   intraday : Asian range break on a closed 15m bar, entered WITH the break (STOP), 1h = direction TF
  *   swing    : 4H EMA50/200 trend filter + pullback to EMA20/50-Fib zone (LIMIT)
  *   position : 1W close vs EMA20W + deep daily pullback (Fib 50-61.8) (LIMIT)
  * Companions (DXY/US10Y/VIX/USDJPY/SPY/WTI/BTC/XAG/GDX) adjust confidence and
@@ -106,11 +106,6 @@ export const NEAR_MISS_RULES: NearMissRule[] = [
         id: 'rr-just-below',
         why_th: 'R:R falls just short after avoiding round numbers — AI may find a more realistic TP that does not sit on a price magnet (15 rounds)',
         match: /R:R [\d.]+ < threshold|gives R:R [\d.]+ </,
-    },
-    {
-        id: 'rvol-just-below',
-        why_th: 'RVOL below threshold only by a rounding margin (real cases 0.99 / 1.04 / 1.08 / 1.18 vs threshold 1.2) — the cutoff is too rigid (11 rounds)',
-        match: /RVOL [\d.]+ < [\d.]+/,
     },
     {
         id: 'past-zone',
@@ -412,29 +407,25 @@ export class GoldTaService {
         // ฝั่งตรงข้ามกรอบ/1.0-1.5×ATR แล้วคุมเงินด้วย position size แทนการบีบ SL
         const slDist = Math.min(Math.max(width, 1.0 * atrH), 1.5 * atrH);
 
-        // research fix (false-breakout rate สูง): ห้ามใช้ blind STOP ดักทะลุ —
-        // ต้องมีแท่ง 15m "ปิด" นอกกรอบยืนยันก่อน แล้วค่อยเทรด retest ของขอบ
-        // + ORB study (Zarattini/Barbon/Aziz, 7,000 หุ้น 2016-23): edge ของ
-        // breakout กระจุกเกือบทั้งหมดในรอบที่ relative volume สูง → แท่งยืนยัน
-        // ต้องมี RVOL ≥ 1.2 ด้วย ไม่งั้นถือว่า break ไร้แรง
+        // no blind STOP ahead of the break: a 15m bar must CLOSE outside the range first.
+        // RVOL on that bar is not a veto any more: the ORB evidence (Zarattini/Barbon/Aziz, US
+        // stocks) did not carry over to CFD tick volume — on 60 days of 5m gold futures the
+        // RVOL ≥ 1.2 breaks did worse than the rest (40% vs 62% won) and the veto had thrown
+        // away 182 of ~400 intraday rounds. It now adds one point of confidence, nothing more.
         const recent = m15.slice(-6);
         const confirmBarUp = recent.find((b) => b.close > rH + 0.05 * atrH);
         const confirmBarDn = recent.find((b) => b.close < rL - 0.05 * atrH);
-        const brokeUpBar = !!confirmBarUp && confirmBarUp.rvol20 >= 1.2;
-        const brokeDnBar = !!confirmBarDn && confirmBarDn.rvol20 >= 1.2;
+        const brokeUpBar = !!confirmBarUp;
+        const brokeDnBar = !!confirmBarDn;
 
         if (!brokeUpBar && !brokeDnBar) {
-            if (confirmBarUp || confirmBarDn) {
-                return this.noTrade(
-                    `A bar closed outside the range but RVOL ${(confirmBarUp ?? confirmBarDn)!.rvol20.toFixed(2)} < 1.2 — breakout lacks force, volume not supportive (ORB evidence), no trade`,
-                );
-            }
             return this.noTrade(
                 'No 15m bar has closed outside the Asian range yet — wait for a break confirmed by a closed bar first (avoid false breakout)',
             );
         }
         const brokeUp = brokeUpBar && !brokeDnBar ? true : brokeDnBar && !brokeUpBar ? false : price > (rH + rL) / 2;
         const bDir = brokeUp ? 1 : -1;
+        const rvolOk = (brokeUp ? confirmBarUp : confirmBarDn)!.rvol20 >= 1.2;
 
         if ((brokeUp && !bull) || (!brokeUp && bull)) {
             return this.noTrade(
@@ -462,22 +453,27 @@ export class GoldTaService {
                 'Price fell back deep into the range after breaking out (fake breakout) — setup cancelled per discipline',
             );
         }
-        const entry = this.avoidRound(ctx, edge, -bDir);
-        const sl = this.avoidRound(ctx, entry - bDir * slDist, -bDir);
+        // enter WITH the break: a STOP just past the last closed 15m bar (placeOrder sends a market
+        // order when price is already through it). Never a resting LIMIT at the edge: that order
+        // fills on the breakouts that fail and misses the ones that run (see scalp #2).
+        const lastClose = m15[m15.length - 1].close;
+        const entry = this.avoidRound(ctx, lastClose + bDir * 0.05 * atrH, bDir);
+        const sl = this.avoidRound(ctx, edge - bDir * slDist, -bDir); // beyond the broken edge, 1.0–1.5×ATR(1h)
+        const risk = bDir * (entry - sl);
         ctx.notes.push(
-            `15m bar closed through the range + 1H/EMA200 direction supports → wait for a retest of the range edge ${this.f(ctx, edge)} (intraday #2 retest)`,
+            `15m bar closed through the range at ${this.f(ctx, lastClose)} + 1H/EMA200 direction supports → ${brokeUp ? 'BUY STOP' : 'SELL STOP'} with the break (intraday #2)${rvolOk ? ' · RVOL ≥ 1.2 confirms' : ''}`,
         );
         return this.buildLevels(ctx, {
-            orderType: brokeUp ? 'BUY_LIMIT' : 'SELL_LIMIT',
+            orderType: brokeUp ? 'BUY_STOP' : 'SELL_STOP',
             entry,
             sl,
             dir: bDir,
             playbook: 'intraday #2',
             sizeBase: 'full',
             magnets: [],
-            validHours: 6,
-            confBase: 6 + (this.emaTrendAligned(h1, brokeUp) ? 1 : 0),
-            tpOverride: this.avoidRound(ctx, entry + bDir * Math.max(1.5 * width, ctx.rrMin * slDist), bDir),
+            validHours: 2, // re-issued by the next rounds while the setup holds; a stale STOP must not linger
+            confBase: 6 + (this.emaTrendAligned(h1, brokeUp) ? 1 : 0) + (rvolOk ? 1 : 0),
+            tpOverride: this.avoidRound(ctx, entry + bDir * Math.max(1.5 * width, ctx.rrMin * risk), bDir),
         });
     }
 
@@ -557,42 +553,57 @@ export class GoldTaService {
             });
         }
 
-        // Setup B — Asian-range break-retest on 5m (scalp #2)
+        // Setup B — Asian-range break on 5m (scalp #2): go WITH the first close beyond the edge.
+        // Replay of 60 trading days (5m bars, London 02:00–05:00 ET, live spreads): a resting LIMIT
+        // at the edge reached its target 0–9% of the time — breakouts that run never come back and
+        // the ones that come back are failing (adverse selection). A STOP just past the confirming
+        // close hit TP on 52% (EURUSD) / 59% (GBPUSD) / 45% (USDJPY) of entries at 1.5R with the
+        // breakeven step at +1R. Only the first close just past the edge counts (< 0.75×ATR beyond
+        // it); anything further is chasing. Real fills on DEMO before the change: 0 of 5 setups won.
         const range = this.asianRange(m5, Date.now());
         if (range) {
             const { hi: rH, lo: rL } = range;
-            const price = this.livePrice(ctx, [seriesKey(ctx.p, '5m')]);
+            const last = m5[m5.length - 1]; // the last CLOSED 5m bar — a forming bar is not a close
+            const price = last.close;
             const brokeUp = price > rH + 0.1 * atr5;
             const brokeDn = price < rL - 0.1 * atr5;
             if ((brokeUp && bull15) || (brokeDn && !bull15)) {
                 const dir = brokeUp ? 1 : -1;
                 const edge = brokeUp ? rH : rL;
-                if (dir * (price - edge) < 1.0 * (rH - rL)) {
-                    const entry = this.avoidRound(ctx, edge, -dir);
-                    const sl = this.avoidRound(ctx, entry - dir * 0.7 * atr5 * 2, -dir);
+                const beyond = dir * (price - edge);
+                if (beyond < 0.75 * atr5) {
+                    const entry = this.avoidRound(ctx, price + dir * 0.1 * atr5, dir); // STOP just past the close
+                    const sl = this.avoidRound(ctx, edge - dir * 1.4 * atr5, -dir); // beyond the broken edge
                     const risk = dir * (entry - sl);
                     const tp1 = this.capBeforeRound(
                         ctx,
                         entry + dir * Math.max(ctx.rrMin * risk, Math.min(1.5 * (rH - rL), ctx.p.scalp.breakCap)),
                         dir,
                     );
-                    if ((dir * (tp1 - entry)) / risk >= ctx.rrMin) {
+                    if ((dir * (tp1 - entry)) / risk >= ctx.rrMin - 1e-9) {
                         ctx.notes.push(
-                            `Break of Asian range ${this.f(ctx, rL)}–${this.f(ctx, rH)} on the ${brokeUp ? 'upper' : 'lower'} side → wait for edge retest (scalp #2)`,
+                            `5m close ${this.f(ctx, price)} beyond the Asian range ${this.f(ctx, rL)}–${this.f(ctx, rH)} on the ${brokeUp ? 'upper' : 'lower'} side, 15m trend agrees → ${dir > 0 ? 'BUY STOP' : 'SELL STOP'} with the break (scalp #2)`,
                         );
                         return this.finishDecision(ctx, {
-                            order_type: dir > 0 ? 'BUY_LIMIT' : 'SELL_LIMIT',
+                            order_type: dir > 0 ? 'BUY_STOP' : 'SELL_STOP',
                             entry,
                             sl,
                             tp1,
                             tp2: this.capBeforeRound(ctx, entry + dir * (dir * (tp1 - entry)) * 1.7, dir),
                             playbook: 'scalp #2',
                             size: 'half',
-                            validHours: 0.75,
+                            validHours: 2, // re-issued by the next rounds while the setup holds
                             conf: 5 + 1,
                             dir,
                         });
                     }
+                    ctx.notes.push(
+                        'Range break found but R:R after avoiding round numbers is below threshold — skip (scalp #2)',
+                    );
+                } else {
+                    ctx.notes.push(
+                        `Price already ${this.f(ctx, beyond)} (${(beyond / atr5).toFixed(1)}×ATR) past the range edge — not chasing (scalp #2)`,
+                    );
                 }
             }
         }
@@ -629,7 +640,7 @@ export class GoldTaService {
             if (dir < 0 && m < p.entry && tp1 < m + 0.1 * risk) tp1 = Math.max(tp1, m + 0.1 * risk);
         }
         const rr1 = (dir * (tp1 - p.entry)) / risk;
-        if (rr1 < ctx.rrMin) {
+        if (rr1 < ctx.rrMin - 1e-9) {
             return this.noTrade(
                 `Realistic target (avoiding round numbers/magnets) gives R:R ${rr1.toFixed(2)} < threshold ${ctx.rrMin} — not worth it (playbook ${p.playbook})`,
             );

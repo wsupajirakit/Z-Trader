@@ -25,6 +25,18 @@ const DEMO_READ_ONLY_REQUESTS: ReadonlySet<string> = new Set([
 ]);
 
 const HEARTBEAT_MS = 10_000; // ต้องต่ำกว่า idle timeout ~30s ของ cTrader ให้มีที่เหลือเฟือ
+/**
+ * Sign-in watchdog. 4 Nov 2026: the socket stayed open for 12 hours with the account never
+ * authorized and nothing reconnected — 360 rounds (16% of the archive) ended as "cTrader not
+ * authorized". Now the socket must open within HANDSHAKE_TIMEOUT and the account must be
+ * authorized within AUTH_TIMEOUT of opening, or it is dropped and the sign-in retried with
+ * backoff. Overridable for tests: CTRADER_HANDSHAKE_TIMEOUT_MS / CTRADER_AUTH_TIMEOUT_MS /
+ * CTRADER_RECONNECT_BASE_MS.
+ */
+const HANDSHAKE_TIMEOUT_MS_DEFAULT = 20_000;
+const AUTH_TIMEOUT_MS_DEFAULT = 30_000;
+const RECONNECT_BASE_MS_DEFAULT = 5_000;
+const RECONNECT_MAX_MS = 60_000;
 
 @Injectable()
 export class CtraderService implements OnModuleInit, OnModuleDestroy {
@@ -33,6 +45,8 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
     private root!: protobuf.Root;
     private heartbeatInterval?: NodeJS.Timeout;
     private reconnectTimeout?: NodeJS.Timeout;
+    private authWatch?: NodeJS.Timeout;
+    private reconnectAttempts = 0;
     private isConnected = false;
     private shuttingDown = false;
     private isAccountAuthorized = false;
@@ -81,14 +95,19 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
             this.configService.get<string>('CTRADER_HOST') ||
             (mode === 'LIVE' ? 'live.ctraderapi.com' : 'demo.ctraderapi.com');
         const port = this.configService.get<number>('CTRADER_PORT', 5035);
+        // a local stub (tests) speaks plain ws; the real endpoints are always TLS
+        const scheme = host === '127.0.0.1' || host === 'localhost' ? 'ws' : 'wss';
 
-        this.logger.log(`[MODE: ${mode}] Connecting to cTrader at wss://${host}:${port}`);
-        this.ws = new WebSocket(`wss://${host}:${port}`);
+        this.logger.log(`[MODE: ${mode}] Connecting to cTrader at ${scheme}://${host}:${port}`);
+        this.ws = new WebSocket(`${scheme}://${host}:${port}`, {
+            handshakeTimeout: this.msSetting('CTRADER_HANDSHAKE_TIMEOUT_MS', HANDSHAKE_TIMEOUT_MS_DEFAULT),
+        });
 
         this.ws.on('open', () => {
             this.isConnected = true;
             this.logger.log('WebSocket Connected to cTrader');
             this.startHeartbeat();
+            this.startAuthWatch();
             this.authenticate();
         });
 
@@ -105,6 +124,7 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
             this.spotOwners.clear();
             this.logger.warn('WebSocket Disconnected. Reconnecting...');
             this.stopHeartbeat();
+            this.stopAuthWatch();
             this.failPending('WebSocket disconnected while awaiting a response');
             this.scheduleReconnect();
         });
@@ -224,6 +244,23 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
                 return;
             }
 
+            // 2142 = ProtoOAErrorRes answering no request of ours: during sign-in that is the sign-in
+            // itself failing (bad client id/secret, expired or revoked access token). It used to be
+            // dropped on the floor — socket open, account never authorized, every round for hours
+            // "cTrader not authorized". Now it is logged and the socket is dropped so the reconnect
+            // retries the sign-in with backoff.
+            if (payloadType === 2142) {
+                const error = this.root.lookupType('ProtoOAErrorRes').decode(message.payload) as any;
+                this.logger.error(`cTrader error ${error.errorCode ?? '?'}: ${error.description ?? ''}`);
+                if (!this.isAccountAuthorized) this.dropSocket(`sign-in failed (${error.errorCode ?? '?'})`);
+                return;
+            }
+            // 2147 token invalidated · 2148 client disconnect · 2164 account disconnect: the session is gone
+            if (payloadType === 2147 || payloadType === 2148 || payloadType === 2164) {
+                this.dropSocket(`cTrader ended the session (event ${payloadType})`);
+                return;
+            }
+
             // 2101 = ProtoOAApplicationAuthRes
             if (payloadType === 2101) {
                 this.logger.log('Application authenticated. Authorizing account...');
@@ -233,6 +270,8 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
             // 2103 = ProtoOAAccountAuthRes
             if (payloadType === 2103) {
                 this.isAccountAuthorized = true;
+                this.stopAuthWatch();
+                this.reconnectAttempts = 0;
                 this.logger.log(`Account ${this._activeAccountId} authorized successfully`);
             }
             // 2131 = ProtoOASpotEvent
@@ -596,13 +635,52 @@ export class CtraderService implements OnModuleInit, OnModuleDestroy {
     private scheduleReconnect() {
         if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
         if (this.shuttingDown) return;
-        this.reconnectTimeout = setTimeout(() => this.connect(), 5000);
+        // 5 s, 10 s, 20 s … 60 s between attempts while the sign-in keeps failing; a successful
+        // account authorization resets the ladder
+        const base = this.msSetting('CTRADER_RECONNECT_BASE_MS', RECONNECT_BASE_MS_DEFAULT);
+        const delay = Math.min(base * 2 ** Math.min(this.reconnectAttempts, 6), RECONNECT_MAX_MS);
+        this.reconnectAttempts++;
+        this.logger.warn(
+            `reconnecting to cTrader in ${Math.round(delay / 100) / 10} s (attempt ${this.reconnectAttempts})`,
+        );
+        this.reconnectTimeout = setTimeout(() => this.connect(), delay);
+    }
+
+    private msSetting(key: string, dflt: number): number {
+        const v = Number(this.configService.get<string>(key));
+        return Number.isFinite(v) && v > 0 ? v : dflt;
+    }
+
+    /** drops the socket; its close handler reconnects with backoff */
+    private dropSocket(why: string) {
+        this.logger.warn(`${why} — dropping the cTrader socket to retry`);
+        this.isAccountAuthorized = false;
+        try {
+            this.ws?.terminate();
+        } catch {
+            /* already closed */
+        }
+    }
+
+    private startAuthWatch() {
+        this.stopAuthWatch();
+        const ms = this.msSetting('CTRADER_AUTH_TIMEOUT_MS', AUTH_TIMEOUT_MS_DEFAULT);
+        this.authWatch = setTimeout(() => {
+            if (!this.isAccountAuthorized)
+                this.dropSocket(`account not authorized ${Math.round(ms / 1000)} s after connecting`);
+        }, ms);
+    }
+
+    private stopAuthWatch() {
+        if (this.authWatch) clearTimeout(this.authWatch);
+        this.authWatch = undefined;
     }
 
     /** the socket's close handler would otherwise schedule a reconnect after shutdown */
     onModuleDestroy() {
         this.shuttingDown = true;
         this.stopHeartbeat();
+        this.stopAuthWatch();
         if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
         this.failPending('service shutting down');
         if (this.ws) this.ws.close();

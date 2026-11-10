@@ -151,7 +151,7 @@ const decimals = (v) => { const s = String(v); return s.includes('.') ? s.split(
 const isRoundish = (p, v) => { const m = v / p.round.step; return Math.abs(m - Math.round(m)) * p.round.step < p.round.buffer - 1e-9; };
 const RR = { scalp: 1.5, intraday: 1.8, swing: 2.0, position: 2.5 };
 for (const [p, base, vol] of [[EUR, 1.08, 0.0012], [GBP, 1.27, 0.0016], [JPY, 150, 0.12]]) {
-    let trades = 0, badDecimals = 0, roundHits = 0, badRR = 0, scalpTpBad = 0, runs = 0, errors = 0;
+    let trades = 0, badDecimals = 0, roundHits = 0, badRR = 0, scalpTpBad = 0, breakBad = 0, breaks = 0, runs = 0, errors = 0;
     for (let seed = 1; seed <= 80; seed++) {
         for (const mode of ['scalp', 'intraday', 'swing', 'position']) {
             for (const nowTs of [Date.UTC(2026, 7, 18, 8, 40), Date.UTC(2026, 7, 18, 13, 5)]) {
@@ -170,10 +170,16 @@ for (const [p, base, vol] of [[EUR, 1.08, 0.0012], [GBP, 1.27, 0.0016], [JPY, 15
                 if (isRoundish(p, d.entry) || (mode !== 'position' && isRoundish(p, d.sl))) roundHits++;
                 const risk = Math.abs(d.entry - d.sl), reward = Math.abs(d.tp1 - d.entry);
                 if (reward / risk < RR[mode] * 0.9) badRR++;
-                if (mode === 'scalp') {
+                if (mode === 'scalp' && d.playbook_ref === 'scalp #1') {
                     const tpDist = Math.abs(d.tp1 - d.entry);
-                    // เป้า scalp ต้องอยู่ในช่วง [min, max] ของโปรไฟล์ (บวก tolerance จาก capBeforeRound)
+                    // เป้า sweep scalp ต้องอยู่ในช่วง [min, max] ของโปรไฟล์ (บวก tolerance จาก capBeforeRound)
                     if (tpDist < p.scalp.min - p.round.tpBuffer - 1e-9 || tpDist > p.scalp.max + p.round.tpBuffer + 1e-9) scalpTpBad++;
+                }
+                // the Asian-range break (scalp #2 / intraday #2) enters WITH the break: a STOP past the
+                // closing price, never a LIMIT back at the edge (adverse selection, see gold-ta.service)
+                if (d.playbook_ref === 'scalp #2' || d.playbook_ref === 'intraday #2') {
+                    breaks++;
+                    if (!d.order_type.endsWith('STOP')) breakBad++;
                 }
             }
         }
@@ -183,7 +189,8 @@ for (const [p, base, vol] of [[EUR, 1.08, 0.0012], [GBP, 1.27, 0.0016], [JPY, 15
     t(`${p.key} prices respect ${p.digits} decimals`, badDecimals === 0, `${badDecimals}`);
     t(`${p.key} entry/SL avoid round levels (${p.round.label_th})`, roundHits === 0, `${roundHits}`);
     t(`${p.key} R:R ≥ mode minimum`, badRR === 0, `${badRR}`);
-    t(`${p.key} scalp TP within profile pips range`, scalpTpBad === 0, `${scalpTpBad}`);
+    t(`${p.key} sweep-scalp TP within profile pips range`, scalpTpBad === 0, `${scalpTpBad}`);
+    t(`${p.key} range breaks are STOP entries (${breaks})`, breakBad === 0, `${breakBad}`);
 }
 
 console.log(`\n${fail === 0 ? '✅ FX ผ่านหมด' : '❌ FX พัง'} ${pass}/${pass + fail}`);

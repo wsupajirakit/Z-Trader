@@ -71,7 +71,8 @@ Nothing on the server side comes from OpenTerminalUI. Below is how the main part
 
 **Analysis and decisions** (`src/gold/`)
 - A rule-based TA engine runs a playbook per mode (scalp / intraday / swing / position) for XAUUSD, EURUSD,
-  GBPUSD and USDJPY.
+  GBPUSD and USDJPY. The Asian-range break setups enter with the break at London open, never on a resting
+  LIMIT at the edge — measured in [breakout-entry.md](breakout-entry.md).
 - An optional AI layer sits on top of TA:
   - *assist*: the AI may confirm, adjust or veto a TA setup, and can only lower risk.
   - *lead*: when TA finds nothing, the AI may propose a trade at half size or less.

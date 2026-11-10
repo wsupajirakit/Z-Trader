@@ -175,12 +175,15 @@ export function isInstrumentKey(v: string | undefined | null): v is InstrumentKe
 
 // ---------------- XAUUSD — ค่าเดิมทั้งหมด ห้ามแก้ตัวเลข ----------------
 
+// Windows (New York time) measured on 60 trading days of 5m bars: the Asian-range break paid
+// only at London open (02:00–05:00 ET: EURUSD +0.45R, GBPUSD +0.26R per trade with live spreads)
+// and lost on every instrument during the NY overlap (08:00–12:00 ET: −0.27 / +0.05 / −0.28 R).
+// 02:00 ET (Frankfurt) is the most active hour of the European morning on the real feed.
+// Intraday breakouts after 09:00 ET failed the same way, so new intraday entries stop at 07:00 ET;
+// open positions are managed all day regardless.
 const XAU_SESSION: SessionSpec = {
-    scalpWindows: [
-        [3 * 60, 5 * 60],
-        [8 * 60, 12 * 60],
-    ], // London open 03-05 ET / overlap 08-12 ET
-    intradayWindow: [150, 12 * 60 + 30], // 02:30–12:30 ET
+    scalpWindows: [[2 * 60, 5 * 60]], // London open 02-05 ET
+    intradayWindow: [150, 7 * 60], // 02:30–07:00 ET
     blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30)' }],
     fridayCutoff: 12 * 60,
 };
@@ -291,7 +294,10 @@ export const XAUUSD_PROFILE: InstrumentProfile = {
     quoteCcy: 'USD',
     maxLot: 0.1, // ดูที่มาในคอมเมนต์ maxLot ของ interface — คุมด้วยความผันผวน ไม่ใช่ notional
     // SL ของ swing/position กว้างเกินกว่าที่ไม้ต่ำสุด 0.01 lot จะคุมงบได้ (ดู tradableModes)
-    tradableModes: ['scalp', 'intraday'],
+    // scalp is off for gold: in the 60-day 5m replay no variant of the Asian-range break paid on
+    // gold (TP 30–42%, −0.1…+0.15R) while the same rules paid on EUR/GBP. Gold's edge is in the
+    // trend modes. Re-enable with GOLD_MODES_XAUUSD=scalp,intraday once a gold setup is validated.
+    tradableModes: ['intraday'],
     round: { step: 50, buffer: 1.6, tpBuffer: 2.0, label_th: '$50/$100' },
     scalp: { min: 2.0, max: 4.5, breakCap: 4.0 },
     hours: METALS_HOURS,
@@ -310,21 +316,15 @@ export const XAUUSD_PROFILE: InstrumentProfile = {
 // ---------------- Forex ----------------
 
 const FX_SESSION_EU: SessionSpec = {
-    scalpWindows: [
-        [3 * 60, 5 * 60],
-        [8 * 60, 12 * 60],
-    ],
-    intradayWindow: [150, 12 * 60 + 30],
+    scalpWindows: [[2 * 60, 5 * 60]],
+    intradayWindow: [150, 7 * 60],
     blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30 / ECB 08:15)' }],
     fridayCutoff: 12 * 60,
 };
 
 const FX_SESSION_GBP: SessionSpec = {
-    scalpWindows: [
-        [3 * 60, 5 * 60],
-        [8 * 60, 12 * 60],
-    ],
-    intradayWindow: [150, 12 * 60 + 30],
+    scalpWindows: [[2 * 60, 5 * 60]], // 02:00–02:30 is a UK-data blackout, so 02:30–05:00 in practice
+    intradayWindow: [150, 7 * 60],
     blackouts: [
         { from: 2 * 60, to: 2 * 60 + 30, label_th: 'news blackout 02:00-02:30 ET (UK data 07:00 London)' },
         { from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30)' },
@@ -333,13 +333,12 @@ const FX_SESSION_GBP: SessionSpec = {
 };
 
 const FX_SESSION_JPY: SessionSpec = {
-    // Tokyo open 19:00–21:00 ET (ช่วงเยนมีชีวิต) + London open + overlap
+    // Tokyo open 19:00–21:00 ET (ช่วงเยนมีชีวิต) + London open
     scalpWindows: [
         [19 * 60, 21 * 60],
-        [3 * 60, 5 * 60],
-        [8 * 60, 12 * 60],
+        [2 * 60, 5 * 60],
     ],
-    intradayWindow: [150, 12 * 60 + 30],
+    intradayWindow: [150, 7 * 60],
     blackouts: [{ from: 8 * 60, to: 9 * 60, label_th: 'news blackout 08:00-09:00 ET (US data 08:30)' }],
     fridayCutoff: 12 * 60,
 };

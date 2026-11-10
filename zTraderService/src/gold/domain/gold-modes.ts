@@ -94,10 +94,10 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
             'SL above/below the sweep point + spread buffer · or 0.5–0.8 × ATR14(5m) · never place exactly on a $50/$100 round number (swept most often)',
         playbook: [
             'Main setup A — Liquidity Sweep: price spikes clearly through a high/low or a round number ($xx50/$xx00) then snaps straight back into the range (sweep+displacement) → enter on the retest of the freshly broken level/FVG · target = the opposite-side pool · SL just beyond the sweep',
-            'Main setup B — Asian range Break-Retest: at London open (14:00 BKK / 03:00 ET) price breaks the Asian range then pulls back to retest the range edge → enter in the breakout direction · stats: breakouts run on average 1.5–2× the Asian range width',
-            'Money-making windows for this mode: London open 14:00-16:00 BKK and London-NY overlap 19:00-23:00 BKK (08:00-12:00 ET = highest-volume period of the day) — outside these windows (especially from NY close to Asia open) spreads are wide and signals unreliable = NO-TRADE by default',
+            'Main setup B — Asian range Break: at London open (02:00–05:00 ET / 14:00–17:00 BKK) a 5m bar CLOSES beyond the Asian range with the 15m trend in the same direction → enter WITH the break: BUY STOP / SELL STOP just past that close (market if price is already through) · SL 1.4×ATR14(5m) beyond the broken edge · TP = 1.5R · never a resting LIMIT at the range edge — measured over 60 trading days a LIMIT at the edge reached its target only 0–9% of the time (breakouts that run never retest; the ones that retest are failing)',
+            'Money-making window for this mode: London open only, 02:00–05:00 ET (14:00–17:00 BKK) — the same break setup during the London–NY overlap (08:00–12:00 ET) lost money on every instrument in the 60-day replay, and outside these hours spreads are wide and signals unreliable = NO-TRADE',
             'Round numbers: gold systematically stalls/bounces/reverses at $50 and $100 levels — do not set the first TP beyond the next round number · for entries near a round number wait for the sweep first, do not front-run',
-            'Realistic target per trade: $2–4 (20–40 pips) · news at 19:30 BKK (08:30 ET: NFP/CPI/jobless) = NO-TRADE ±30 minutes — news minutes are the most volatile timestamps of the week, spreads widen and slippage is heavy',
+            "Realistic target per trade: 1.5× the SL distance, not a fixed dollar figure — gold's ATR14(5m) is ≈ $4.5 in 2026, so a $2 target sits inside noise · news at 19:30 BKK (08:30 ET: NFP/CPI/jobless) = NO-TRADE ±30 minutes — news minutes are the most volatile timestamps of the week, spreads widen and slippage is heavy",
         ],
         sets: [
             { symbol: 'XAUUSD', tf: '5m', nBars: 500 },
@@ -116,7 +116,7 @@ export const GOLD_MODES: Record<GoldMode, GoldModeSpec> = {
         slGuide: 'SL 0.8–1.2 × ATR14(1h) or below/above the opposite edge of the Asian range · avoid round numbers',
         playbook: [
             'The core game of this mode is the 3-session cycle: Asia (06:00-14:00 BKK) builds the day range → London (14:00 BKK) breaks or rejects the range → continuation into NY (19:30 BKK) — standard target 1.5–2× the Asian range width',
-            'Setup A — London break: break of the Asian high/low + a 15m/30m bar closing outside the range + retest that holds → BUY STOP/SELL STOP in the breakout direction or enter on the retest',
+            'Setup A — London break: break of the Asian high/low + a 15m bar CLOSING outside the range → enter WITH the break (BUY STOP/SELL STOP just past that close, market if already through) · SL beyond the opposite side of the break, 1.0–1.5×ATR14(1h) · no resting LIMIT at the edge (it fills on the failing breakouts and misses the running ones) · RVOL ≥ 1.2 on the break bar adds confidence but is not required · new entries only 02:30–07:00 ET; breaks after 09:00 ET failed in the replay',
             'Setup B — London reject (fade): spike through the range then close back inside (fake breakout) → trade against it toward the opposite range edge — half the size of Setup A',
             'NY 19:30 BKK (08:30 ET) data is the intraday accelerator/reversal point — only hold through it with trades already in profit buffer; new trades wait 15-30 minutes after the news · FOMC day = no opening before 01:00 BKK (14:00 ET)',
             'Always check intraday direction against DXY/US10Y 1h: gold moves inverse to DXY (corr −0.5..−0.8) — if gold rises together with DXY rising = a weak leg, do not chase',
@@ -237,7 +237,7 @@ export const SESSION_MAP: Array<[string, string]> = [
     ['London open', '14:00 BKK (03:00 ET) — first real move of the day, often breaks/rejects the Asian range'],
     [
         'London–NY overlap',
-        '19:00–23:00 BKK (08:00–12:00 ET) — highest volume+volatility of the day · main money-making window for scalp/intraday',
+        '19:00–23:00 BKK (08:00–12:00 ET) — highest volume+volatility of the day · manage and hold trades here; new breakout entries are taken at London open only (the same break during the overlap lost in the 60-day replay)',
     ],
     [
         'US data',

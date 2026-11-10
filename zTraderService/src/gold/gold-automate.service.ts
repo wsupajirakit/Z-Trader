@@ -129,6 +129,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     private lastSpotResubAt = new Map<string, number>(); // key = instrument -> last resubscribe attempt (throttle per instrument)
     // นับ scalp ต่อวัน แยกตามตราสาร (key = instrument)
     private scalpCount = new Map<string, { day: string; count: number }>();
+    /** breakout trades (playbook "#2") already placed today: `${instrument}:${mode}:${side}` -> UTC day */
+    private breakoutDone = new Map<string, string>();
     // สมัครรับราคาสดของหลายตราสารพร้อมกันได้ (loop วนหลายตราสาร) — key = instrument key
     private spotSubscribed = new Map<string, boolean>();
     private spotSymbolId = new Map<string, number>(); // instrument key -> symbolId subscribed for live prices
@@ -2719,6 +2721,19 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         symbolId: number,
         trace: RoundTrace | null = null,
     ): Promise<string> {
+        const side = d.order_type.startsWith('BUY') ? 'BUY' : 'SELL';
+        // one breakout trade per side per day (scalp #2 / intraday #2). The replay that justifies
+        // entering with the break took exactly one trade per side per day; left alone, the next
+        // rounds would re-enter every 5–15 min while price keeps running — pyramiding that was
+        // never measured. The order already working for this side stays as it is.
+        const breakoutKey = /#2$/.test(d.playbook_ref) ? `${p.key}:${mode}:${side}` : null;
+        const today = new Date().toISOString().slice(0, 10);
+        if (breakoutKey && this.breakoutDone.get(breakoutKey) === today) {
+            throw new OrderSkipped(
+                `${d.playbook_ref} already placed on the ${side} side today — one breakout trade per side per day`,
+            );
+        }
+
         // one working pending order per mode per instrument — a new round REPLACES the previous
         // order instead of stacking on top of it (post-mortem: stacked limits
         // filled together and multiplied one loss by 3). Fail closed: if the broker cannot be
@@ -2760,8 +2775,32 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         }
 
         const uuid = `gold-${mode}-${randomUUID()}`;
-        const side = d.order_type.startsWith('BUY') ? 'BUY' : 'SELL';
-        const orderType = d.order_type.endsWith('LIMIT') ? 'LIMIT' : 'STOP';
+        let orderType: 'LIMIT' | 'STOP' | 'MARKET' = d.order_type.endsWith('LIMIT') ? 'LIMIT' : 'STOP';
+        let price = d.entry!;
+        if (orderType === 'STOP') {
+            // a STOP means "enter with the move". Bar close → analysis → order takes seconds, so the
+            // market is often already through the level, and a STOP on the wrong side of the market
+            // is rejected by the broker: it goes out at market instead. Past 25% of the SL distance
+            // it would be a different trade — not chasing.
+            const tk = this.getLastTick(p);
+            if (tk && Date.now() - tk.at <= STALE_TICK_MS) {
+                const dir = side === 'BUY' ? 1 : -1;
+                const mkt = side === 'BUY' ? tk.ask : tk.bid;
+                const past = dir * (mkt - price);
+                if (past > 0.25 * Math.abs(price - d.sl!)) {
+                    throw new OrderSkipped(
+                        `price ${mkt} already ran ${fmtPrice(p, past)} past the ${d.order_type} level ${price} (over 25% of the SL distance) — not chasing`,
+                    );
+                }
+                if (past > 0) {
+                    this.logger.log(
+                        `[${p.key}/${mode}] market ${mkt} is already through the ${d.order_type} level ${price} — sending at market`,
+                    );
+                    orderType = 'MARKET';
+                    price = mkt;
+                }
+            }
+        }
         const sizing = this.sizeOrder(d.size, sizeCap, d.entry, d.sl, p);
         const volume = sizing.lots;
         if (trace) trace.sizing = sizing;
@@ -2779,13 +2818,13 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             side,
             orderType,
             volume,
-            price: d.entry,
+            price,
             stopLoss: d.sl,
             takeProfit: d.tp1,
             strategy: 'GOLD_AI',
             mode: mode.toUpperCase(),
         };
-        if (d.valid_until_utc) {
+        if (d.valid_until_utc && orderType !== 'MARKET') {
             orderParams.expirationTimestamp = Date.parse(d.valid_until_utc); // cTrader cancels the pending order itself
         }
 
@@ -2795,7 +2834,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             side,
             orderType,
             volume,
-            price: d.entry!,
+            price,
             stopLoss: d.sl!,
             takeProfit: d.tp1!,
             strategy: 'GOLD_AI',
@@ -2830,6 +2869,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         }
 
         await this.executionService.executeOrder(orderParams);
+        if (breakoutKey) this.breakoutDone.set(breakoutKey, today);
         return uuid;
     }
 
