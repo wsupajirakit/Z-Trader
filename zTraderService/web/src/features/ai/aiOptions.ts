@@ -40,23 +40,23 @@ export const STRICTNESS: readonly {
     id: 'normal',
     label: 'Normal',
     detail:
-      'No extra veto — the AI may lower confidence; the global minimum confidence decides.',
+      'No extra veto — the AI may lower confidence; the global minimum confidence decides. Range breaks (scalp #2 / intraday #2): an AI doubt halves the size instead; only a major release or bad data cancels them.',
   },
   {
     id: 'strict',
     label: 'Strict',
     detail:
-      'Trades where the AI’s own confidence is below 6/10 are vetoed; a stricter prompt and lower temperature.',
+      'Trades where the AI’s own confidence is below 6/10 are vetoed; a stricter prompt and lower temperature. Range breaks (scalp #2 / intraday #2): an AI doubt halves the size instead; only a major release or bad data cancels them.',
   },
   {
     id: 'very_strict',
     label: 'Very strict',
-    detail: 'AI confidence must be 7/10 or more; only textbook setups pass.',
+    detail: 'AI confidence must be 7/10 or more; only textbook setups pass. Range breaks (scalp #2 / intraday #2): an AI doubt quarters the size instead; only a major release or bad data cancels them.',
   },
   {
     id: 'maximum',
     label: 'Maximum',
-    detail: 'AI confidence must be 8/10; capital preservation first.',
+    detail: 'AI confidence must be 8/10; capital preservation first. Range breaks (scalp #2 / intraday #2): an AI doubt quarters the size instead; only a major release or bad data cancels them.',
   },
 ];
 

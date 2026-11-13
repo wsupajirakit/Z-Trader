@@ -71,7 +71,7 @@ const news = [
 const validAssist = {
     verdict: 'ADJUST', entry: 4002, sl: 3988.5, tp1: null, tp2: null, size: 'half', confidence: 7,
     key_levels: '4000 / 3989 swing low', risk_note: 'ใกล้เลขกลม 4000', reason: 'ขยับ SL ลงใต้ swing',
-    news_risk: 'Fed พุธ', invalidation: 'ปิด 5m ใต้ 3985',
+    news_risk: 'Fed พุธ', invalidation: 'ปิด 5m ใต้ 3985', veto_reason: 'none',
 };
 
 // ---------- service + captured client ----------
@@ -115,7 +115,7 @@ let captured = [], logs = [];
     t('systemInstruction contains persona + role', c.systemInstruction.startsWith(XAUUSD_PROFILE.brief.persona_th) && c.systemInstruction.includes('trade reviewer'));
     t('systemInstruction has pip value $10/lot at entry', c.systemInstruction.includes('1 pip move = 10.00 USD/lot'));
     t('responseJsonSchema set with anyOf nullable numbers', c.responseJsonSchema && c.responseJsonSchema.type === 'object'
-        && Array.isArray(c.responseJsonSchema.properties.entry.anyOf) && c.responseJsonSchema.required.includes('news_risk') && c.responseJsonSchema.required.includes('invalidation'));
+        && Array.isArray(c.responseJsonSchema.properties.entry.anyOf) && c.responseJsonSchema.required.includes('news_risk') && c.responseJsonSchema.required.includes('invalidation') && c.responseJsonSchema.required.includes('veto_reason'));
     t('responseMimeType application/json', c.responseMimeType === 'application/json');
     t('thinkingConfig.thinkingLevel === ThinkingLevel.HIGH', c.thinkingConfig && c.thinkingConfig.thinkingLevel === ThinkingLevel.HIGH && c.thinkingConfig.thinkingLevel === 'HIGH');
     t('temperature/topK/topP/maxOutputTokens present', c.temperature === 0.2 && c.topK === 40 && c.topP === 0.95 && c.maxOutputTokens === 16384);

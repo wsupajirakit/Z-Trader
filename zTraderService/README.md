@@ -13,7 +13,9 @@ service trades a **DEMO** account by default. LIVE needs two explicit switches (
   (Gemini confirms, adjusts or vetoes a TA setup), *TA + AI lead* (Gemini also proposes a setup when TA finds
   none, at half size or less, through stricter checks) or *AI only* (the AI proposes every trade; Gemini, or
   Claude with `ANTHROPIC_API_KEY`). The model, the "intelligence" (thinking depth) and a strictness level are
-  set on the dashboard too. Strictness only tightens: above *normal*, AI confidence below 6/7/8 vetoes the trade.
+  set on the dashboard too. Strictness only tightens: above *normal*, AI confidence below 6/7/8 vetoes the trade —
+  except range breaks (scalp #2 / intraday #2), where a doubt makes the position smaller and only a major release or
+  bad data cancels it ([docs/breakout-entry.md](docs/breakout-entry.md)).
   AI output only reaches the broker after code-side guards have passed. The guards cover side of the market,
   entry drift, SL/TP placement, R:R, minimum confidence and size. If Gemini has no key, fails, times out or hits
   its daily call budget, a confirm/lead round uses TA only and an AI-only round places no trade. A Claude

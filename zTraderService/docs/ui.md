@@ -80,7 +80,9 @@ Nothing on the server side comes from OpenTerminalUI. Below is how the main part
 - AI answers always pass the same code guards: R:R minimum, ATR-bounded stop, correct side of the market,
   size cap, minimum confidence, risk budget.
 - **Strictness** (`src/gold/ai/ai-strictness.ts`) only ever tightens: above "normal", AI confidence below 6/7/8
-  vetoes the trade, the prompt gets stricter and the sampling temperature is capped.
+  vetoes the trade, the prompt gets stricter and the sampling temperature is capped. Range breaks are the exception
+  (`src/gold/ai/range-break-rules.ts`): every AI prompt carries their rules after the strictness line, and a doubt
+  makes them smaller instead of cancelling them.
 
 **Risk**
 - Guards: risk per trade, a daily loss stop (with a manual reset), open-position caps per instrument and in

@@ -16,6 +16,12 @@ import {
 import { marketStatus } from '../domain/market-hours';
 import { demoContext } from '../../common/demo/demo-context';
 import {
+    RANGE_BREAK_ANALYST_RULES,
+    RANGE_BREAK_REVIEWER_RULES,
+    VETO_REASONS,
+    type VetoReason,
+} from './range-break-rules';
+import {
     AI_STRICTNESS_LEVELS,
     type AiStrictness,
     STRICTNESS_INSTRUCTION,
@@ -61,6 +67,8 @@ export interface GoldAiAssist {
     news_risk?: string;
     /** เงื่อนไขที่ทำให้ไม้ตาย — แตะแล้วควรยกเลิก (ฟิลด์ใหม่) */
     invalidation?: string;
+    /** why the AI vetoed ('none' otherwise); a range break is cancelled only for major_news / data_error */
+    veto_reason?: VetoReason;
 }
 
 /** หัวข้อข่าวที่ส่งให้ AI อ่านประกอบ (ผู้เรียกดึงจาก RSS ตาม profile.news) */
@@ -155,6 +163,12 @@ const ASSIST_SCHEMA = {
             description:
                 'Invalidation condition — price/event that, once hit, should cancel the order (in English, one line)',
         },
+        veto_reason: {
+            type: 'string',
+            enum: [...VETO_REASONS],
+            description:
+                'Why you VETO — "none" when CONFIRM/ADJUST. A range break (scalp #2 / intraday #2) is cancelled only for major_news or data_error',
+        },
     },
     required: [
         'verdict',
@@ -169,6 +183,7 @@ const ASSIST_SCHEMA = {
         'reason',
         'news_risk',
         'invalidation',
+        'veto_reason',
     ],
     additionalProperties: false,
 } as const;
@@ -340,6 +355,20 @@ export class GoldGeminiService {
         return line ? `${system}\n\n${line}` : system;
     }
 
+    /**
+     * What assist() sends as the system instruction: the reviewer prompt, the strictness line, then the
+     * range-break rules — at every strictness level, last, so they override the strictness line for
+     * scalp #2 / intraday #2 (see range-break-rules.ts).
+     */
+    assistSystemInstruction(profile: InstrumentProfile, mode: GoldMode, refPrice?: number | null): string {
+        return `${this.withStrictness(this.buildSystemPrompt(profile, mode, refPrice))}\n\n${RANGE_BREAK_REVIEWER_RULES}`;
+    }
+
+    /** what propose() sends (lead and AI only): the analyst prompt, the strictness line, then the range-break rules */
+    leadSystemInstruction(profile: InstrumentProfile, mode: GoldMode, refPrice?: number | null): string {
+        return `${this.withStrictness(this.buildLeadSystemPrompt(profile, mode, refPrice))}\n\n${RANGE_BREAK_ANALYST_RULES}`;
+    }
+
     get apiKey(): string {
         return (this.configService.get<string>('GEMINI_API_KEY') ?? '').trim();
     }
@@ -505,7 +534,7 @@ export class GoldGeminiService {
         let systemInstruction: string;
         let prompt: string;
         try {
-            systemInstruction = this.withStrictness(this.buildSystemPrompt(profile, mode, ta.entry));
+            systemInstruction = this.assistSystemInstruction(profile, mode, ta.entry);
             prompt = this.buildUserPrompt(mode, ta, series, runtime, { profile, news: ctx?.news ?? [] }, now);
         } catch (e: any) {
             this.logger.error(`AI assist could not build the prompt (${e?.message ?? e}) — using the TA result as is`);
@@ -602,7 +631,7 @@ export class GoldGeminiService {
         let systemInstruction: string;
         let prompt: string;
         try {
-            systemInstruction = this.withStrictness(this.buildLeadSystemPrompt(profile, mode, refPrice));
+            systemInstruction = this.leadSystemInstruction(profile, mode, refPrice);
             prompt = this.buildLeadUserPrompt(mode, series, runtime, { profile, news: ctx?.news ?? [] }, now);
         } catch (e: any) {
             this.logger.error(`AI lead could not build the prompt (${e?.message ?? e}) — no trade this round`);
@@ -774,11 +803,6 @@ export class GoldGeminiService {
             '- ADJUST = move entry/SL/TP to fit the real price structure better (e.g. avoid round numbers, avoid wick zones, avoid running into a swing/range edge)',
             '- VETO = this trade should not be taken (conflicting structure, close to major news, R:R not worth it after adjusting, companions clearly opposing, outside the mode time window)',
             '',
-            '## Range breaks (scalp #2 / intraday #2) — overrides the level rules below',
-            "- Entry (a STOP with the break), SL (beyond the broken edge) and TP1 (1.5R, or 1.5× the Asian range) come from a rule measured over 60 trading days of 5-minute bars. Do not ADJUST them and do not VETO because TP1 crosses a round number, a figure or the previous day's high/low: a London break that holds runs through those levels (of the first breaks vetoed for that reason on 10–12 Nov 2026, 5 of 7 reached TP1).",
-            '- Do not call the entry late or stale: the system sends only the first break per side per day, at the bar that confirmed it.',
-            '- VETO a range break only for a major scheduled release inside its horizon, an obvious data error, or companions clearly pointing the other way. Otherwise CONFIRM; to express doubt, lower confidence or size.',
-            '',
             `## Instrument: ${profile.name_th} (${profile.key})`,
             `- Prices have ${profile.digits} decimals · 1 pip = ${profile.pip} price units (1.0 price unit = ${pips(1)} pips)`,
             `- 1 lot = ${profile.unitsPerLot.toLocaleString('en-US')} ${unitLabel} → 1 pip move = ${pipUsd.toFixed(2)} USD/lot · 1.0 price unit move = ${usdPerUnit.toFixed(2)} USD/lot` +
@@ -845,6 +869,7 @@ export class GoldGeminiService {
             '',
             '## Meaning of each field in the response',
             '- verdict: CONFIRM | ADJUST | VETO as defined above',
+            '- veto_reason: why you VETO — none when CONFIRM/ADJUST · major_news | data_error | structure | levels | late_entry | exposure | companions | other',
             '- entry / sl / tp1 / tp2: recommended prices — null to use the TA value (CONFIRM: all null · ADJUST: only the ones you move · VETO: all null)',
             '- size: quarter | half | full — position size you consider appropriate (relative to the system full size)',
             '- confidence: integer 0-10, your confidence in this trade after review',
@@ -1576,6 +1601,11 @@ export class GoldGeminiService {
             reason: str(raw.reason),
             news_risk: str(raw.news_risk),
             invalidation: str(raw.invalidation),
+            veto_reason: (VETO_REASONS as readonly string[]).includes(str(raw.veto_reason).toLowerCase())
+                ? (str(raw.veto_reason).toLowerCase() as VetoReason)
+                : verdict === 'VETO'
+                  ? 'other'
+                  : 'none',
         };
     }
 

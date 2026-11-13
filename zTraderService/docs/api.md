@@ -183,6 +183,7 @@ Every operator action is written to the audit log.
 
 `ai_strictness` only tightens: above `normal` an AI confidence below 6/7/8 vetoes the trade, the prompt asks for
 stricter setups and Gemini's temperature is capped. Claude models (`claude-*`) serve the `ai_only` mode only.
+Range breaks (scalp #2 / intraday #2) are the exception at every level: their measured levels stand, a doubt makes the position smaller (half; quarter at very strict / maximum) and only a `major_news` or `data_error` veto cancels them (see [breakout-entry.md](breakout-entry.md)).
 
 ### `/api/risk-profiles`
 

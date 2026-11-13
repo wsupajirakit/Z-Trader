@@ -6,6 +6,7 @@ import { InstrumentProfile, XAUUSD_PROFILE } from '../domain/instruments';
 import { errorMessage } from '../../common/utils/errors';
 import { demoContext } from '../../common/demo/demo-context';
 import { AI_STRICTNESS_LEVELS, type AiStrictness, STRICTNESS_INSTRUCTION } from './ai-strictness';
+import { RANGE_BREAK_ANALYST_RULES } from './range-break-rules';
 
 export const DEFAULT_CLAUDE_MODEL = 'claude-opus-5-5';
 
@@ -120,6 +121,15 @@ export class GoldAiService {
 
     constructor(private configService: ConfigService) {}
 
+    /**
+     * The system prompt sent with every request: the desk prompt, the strictness line, then the
+     * range-break rules — at every strictness level, last (see range-break-rules.ts).
+     */
+    systemPrompt(profile: InstrumentProfile): string {
+        const strict = STRICTNESS_INSTRUCTION[this.strictness];
+        return [SYSTEM_PROMPT_FOR(profile), strict, RANGE_BREAK_ANALYST_RULES].filter(Boolean).join('\n\n');
+    }
+
     private getClient(): Anthropic {
         demoContext.assertNotDemo('Calling Claude');
         if (!this.client) {
@@ -219,13 +229,12 @@ export class GoldAiService {
         // adaptive thinking is always on for current Claude models; depth is set with effort (dashboard
         // "intelligence"), strictness is an extra system instruction. A safety decline is re-run on the
         // fallback model server-side (fallbacks: 'default'), and a refusal of the whole chain is NO_TRADE below.
-        const strict = STRICTNESS_INSTRUCTION[this.strictness];
         const stream = this.getClient().beta.messages.stream({
             model,
             max_tokens: 64000,
             betas: ['server-side-fallback-2026-07-01'],
             fallbacks: 'default',
-            system: strict ? `${SYSTEM_PROMPT_FOR(profile)}\n\n${strict}` : SYSTEM_PROMPT_FOR(profile),
+            system: this.systemPrompt(profile),
             thinking: { type: 'adaptive' },
             output_config: {
                 effort: this.effort,

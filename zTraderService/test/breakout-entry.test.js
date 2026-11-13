@@ -145,6 +145,9 @@ test('only the first range break per side per day is a trade; later signals beco
     assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'scalp #2' }), 'scalp', EUR, true).order_type, 'BUY_STOP');
     assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'scalp #1', order_type: 'BUY_LIMIT' }), 'scalp', EUR, true).order_type, 'BUY_LIMIT');
     assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'scalp #1', order_type: 'BUY_LIMIT' }), 'scalp', EUR, true).order_type, 'BUY_LIMIT');
+    // swing #2 / position #2 are pullbacks: never limited by the range-break rule
+    assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'swing #2', order_type: 'BUY_LIMIT' }), 'swing', EUR, true).order_type, 'BUY_LIMIT');
+    assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'swing #2', order_type: 'BUY_LIMIT' }), 'swing', EUR, true).order_type, 'BUY_LIMIT');
 });
 
 test('manual analysis and demo rounds do not use up the day\'s first break', () => {

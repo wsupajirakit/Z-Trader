@@ -54,6 +54,7 @@ import { errorMessage } from '../common/utils/errors';
 import { DomainError, OrderSkipped } from './domain/domain-error';
 import { demoContext } from '../common/demo/demo-context';
 import { AI_STRICTNESS_LEVELS, type AiStrictness, STRICTNESS_MIN_AI_CONFIDENCE } from './ai/ai-strictness';
+import { isRangeBreak, RANGE_BREAK_DOUBT_SIZE, RANGE_BREAK_HARD_VETO } from './ai/range-break-rules';
 
 /** off = TA only · assist = TA, then the AI confirms/vetoes · lead = assist + the AI proposes when TA finds nothing · ai_only = the AI decides every round */
 export const AI_MODES = ['off', 'assist', 'lead', 'ai_only'] as const;
@@ -493,6 +494,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     ): GoldDecision {
         if (!ai) return ta;
         const d: GoldDecision = { ...ta, ai_assist: ai };
+        if (isRangeBreak(ta.playbook_ref)) return this.applyAssistToRangeBreak(ta, ai, d);
 
         if (ai.verdict === 'VETO') {
             return {
@@ -561,10 +563,14 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn('[AI] SL is on the wrong side of entry — using the TA levels instead');
             return { ...d, size, confidence: conf };
         }
-        // R:R หลังขยับต้องยังคุ้ม
+        // R:R หลังขยับต้องยังคุ้ม — only when the AI moved a level: the TA levels already passed this
+        // check before their prices were rounded, and recomputing it from the rounded prices gave
+        // 1.79/1.80 < 1.8 on CONFIRMed trades (9 of 31 range breaks in the 10–12 Nov replay). A moved
+        // level gets a 1% allowance for the same price rounding.
         const risk = Math.abs(entry - sl);
         const rr = risk > 0 ? Math.abs(tp1 - entry) / risk : 0;
-        if (rr < rrMin) {
+        const levelsMoved = entry !== ta.entry || sl !== ta.sl || tp1 !== ta.tp1;
+        if (levelsMoved && rr < rrMin * 0.99) {
             return {
                 ...d,
                 order_type: 'NO_TRADE',
@@ -636,6 +642,44 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             confidence: conf,
             reason: moved ? `${ta.reason} | AI adjusted levels: ${ai.reason}` : `${ta.reason} | AI confirmed`,
         };
+    }
+
+    /**
+     * The AI's answer on a range break (scalp #2 / intraday #2). The measured levels stand whatever the
+     * AI says; it is dropped only for a hard veto (a major release in its horizon, broken data). Any
+     * other doubt — a veto for another reason, or confidence below the strictness or global minimum —
+     * makes the position smaller (half; quarter at very strict / maximum) instead of cancelling it.
+     * The TA confidence is kept, so the AI's doubt shows in the size, not as a skipped trade.
+     * Replay of the live answers 10–12 Nov: docs/breakout-entry.md.
+     */
+    private applyAssistToRangeBreak(ta: GoldDecision, ai: GoldAiAssist, d: GoldDecision): GoldDecision {
+        if (ai.verdict === 'VETO' && RANGE_BREAK_HARD_VETO.includes(ai.veto_reason ?? 'other')) {
+            return {
+                ...d,
+                order_type: 'NO_TRADE',
+                entry: null,
+                sl: null,
+                tp1: null,
+                tp2: null,
+                rr_tp1: null,
+                reason: `AI veto (${ai.veto_reason}): ${ai.reason || 'no reason given'}`,
+            };
+        }
+        const strictness = this.aiStrictness();
+        const minAi = STRICTNESS_MIN_AI_CONFIDENCE[strictness] ?? 0;
+        const minConf = parseInt(this.cfg('GOLD_MIN_CONFIDENCE', '7'), 10);
+        const aiConf = ai.confidence ?? 0;
+        const doubt = ai.verdict === 'VETO' || aiConf < Math.max(minAi, minConf);
+        const rank: Record<GoldSize, number> = { quarter: 0, half: 1, full: 2 };
+        let size: GoldSize = rank[ai.size] < rank[ta.size] ? ai.size : ta.size;
+        const cap = RANGE_BREAK_DOUBT_SIZE[strictness];
+        if (doubt && rank[cap] < rank[size]) size = cap;
+        const why =
+            ai.verdict === 'VETO'
+                ? `AI veto (${ai.veto_reason ?? 'other'}) is not a cancel reason for a range break`
+                : `AI confidence ${aiConf}/10`;
+        const note = doubt ? ` | ${why} → ${size} size` : ` | AI confirmed (${aiConf}/10)`;
+        return { ...d, size, confidence: ta.confidence, reason: `${ta.reason}${note}` };
     }
 
     /**
@@ -1956,6 +2000,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                     p,
                 );
                 trace.base_decision = structuredClone(decision);
+                decision = this.firstBreakOnly(decision, mode, p, !dryRun);
             } else {
                 if (!data.series) throw new Error('TA engine requires locally-built series (GOLD_DATA_SOURCE=local)');
                 decision = this.goldTaService.analyze(mode, data.series, { rrMin: cfg.rrMin, sizeCap, profile: p });
@@ -2197,7 +2242,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
      * (AI veto, a guard, the order). Manual analysis and demo rounds only read the record.
      */
     private firstBreakOnly(d: GoldDecision, mode: GoldMode, p: InstrumentProfile, record: boolean): GoldDecision {
-        if (d.order_type === 'NO_TRADE' || !/#2$/.test(d.playbook_ref)) return d;
+        if (d.order_type === 'NO_TRADE' || !isRangeBreak(d.playbook_ref)) return d;
         const side = d.order_type.startsWith('BUY') ? 'BUY' : 'SELL';
         const key = `${p.key}:${mode}:${side}`;
         const now = new Date();
@@ -2767,7 +2812,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
         // entering with the break took exactly one trade per side per day; left alone, the next
         // rounds would re-enter every 5–15 min while price keeps running — pyramiding that was
         // never measured. The order already working for this side stays as it is.
-        const breakoutKey = /#2$/.test(d.playbook_ref) ? `${p.key}:${mode}:${side}` : null;
+        const breakoutKey = isRangeBreak(d.playbook_ref) ? `${p.key}:${mode}:${side}` : null;
         const today = new Date().toISOString().slice(0, 10);
         if (breakoutKey && this.breakoutDone.get(breakoutKey) === today) {
             throw new OrderSkipped(

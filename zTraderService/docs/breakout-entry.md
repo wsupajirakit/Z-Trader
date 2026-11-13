@@ -138,3 +138,57 @@ Separately, 242 rounds (20%) were again "cTrader not authorized". The macOS powe
 Mac asleep 05:00–15:00 BKK with brief Power Nap wake-ups at those times — there is no network
 during them, so no client can stay signed in. Keep the machine awake while the loop runs
 (`caffeinate -i -w <service pid>`) or run the bot on the server.
+
+## The AI on range breaks — replayed against the real API (13 November 2026)
+
+The question: loosen the AI so it stops vetoing the measured breaks, without losing it as a check.
+`tools/replay/ai_assist_replay.js` re-asks Gemini (the live model and settings) about all 31 range-break
+signals of 10–12 Nov with the inputs of the live round — the archived bars, the TA decision, the
+round's time, the open exposure rebuilt from the ledger — and passes every answer through the live
+gates (`applyAssist` → `validateDecision` → minimum confidence). Headlines are not archived, so none
+are sent (the same for every variant). 240 calls, 2.9 M input tokens.
+
+**The replay is faithful:** with the 10 Nov prompt it gives the same verdict as the live AI 29 of 31 times.
+
+| Variant | AI verdicts (31) | First signals traded (11) | Winners kept (6) | Losers kept (2) | P&L |
+|---|---|---|---|---|---|
+| TA only | — | 11 | 6 | 2 at full size | +9.41R on 8R of risk |
+| 10 Nov prompt, strict | 27 VETO, 4 ADJUST | 2 | 1 | 0 | +1.83R |
+| Prompt section only (13 Nov morning), strict | 31 CONFIRM | 7 | 3 | 1 | +5.04R |
+| **Rules block + code, normal** | 31 CONFIRM | **11** | **6** | 2 at quarter | +7.86R on 4.75R of risk |
+| **… strict** (two runs) | 31 CONFIRM, same verdict 31/31 | **11** | **6** | 2 at quarter | +6.63R / +5.74R |
+| **… very strict** | 31 CONFIRM | **11** | **6** | 2 at quarter | +7.86R |
+| **… maximum** | 31 CONFIRM | **11** | **6** | 2 at quarter | +6.63R |
+
+What the replay showed:
+
+1. **A prompt alone was not enough.** With the first prompt fix the AI confirmed all 31, yet 9 trades
+   still died in code: `applyAssist` recomputed R:R from the rounded prices of an *unchanged* TA trade
+   and got 1.79–1.80 < 1.8. Fixed (unchanged levels are not re-checked; moved levels get a 1% rounding
+   allowance). This hit every playbook, not only range breaks.
+2. **Strictness thresholds would still cancel them**: the AI rates these breaks 6–8/10, so very strict (7)
+   and maximum (8) would drop a third to half of them.
+3. **The AI's size carries information.** It sized both losing breaks at quarter in every run and at
+   every level, and most winners at half or full: return per unit of risk 1.65R against 1.18R for TA only.
+4. **News still stops a trade.** With a US CPI headline injected (due 08:30 ET), the AI vetoed the
+   USDJPY break signalled at 06:00 ET (`major_news`, "2.5 hours before CPI, inside the holding
+   horizon") and let the earlier breaks through at a smaller size — the intraday playbook's own rule
+   (hold through 08:30 ET only with a profit buffer).
+
+So, at every strictness level and in every AI mode:
+
+- **Prompt** — `src/gold/ai/range-break-rules.ts` holds one rules block for the reviewer (assist) and
+  one for the analyst (lead, AI only, the Claude engine). It is appended after the strictness line in
+  every system prompt, so it is sent with every call — the APIs keep no memory between calls — and is
+  the last word on range breaks. A unit test checks all four levels × three prompts.
+- **Answer** — the AI states a `veto_reason` (none, major_news, data_error, structure, levels,
+  late_entry, exposure, companions, other).
+- **Code** — on a range break `applyAssist` keeps the measured levels and the TA confidence, cancels
+  only for `major_news` / `data_error`, and turns any other doubt (a veto for another reason, or a
+  confidence under the strictness or global minimum) into a smaller position: half at normal / strict,
+  quarter at very strict / maximum. Whatever the prompt says, a range break cannot be vetoed for its
+  levels or for being "late".
+
+Limits: 11 first signals over three trending days; no archived headlines; the lead / AI-only and
+Claude prompts carry the block (unit-tested) but were not replayed against the API — the assist mode is
+where the misses happened. Re-run the replay on the next weeks' signals before trusting the sizes.
