@@ -131,6 +131,8 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
     private scalpCount = new Map<string, { day: string; count: number }>();
     /** breakout trades (playbook "#2") already placed today: `${instrument}:${mode}:${side}` -> UTC day */
     private breakoutDone = new Map<string, string>();
+    /** first range-break signal of the day per `${instrument}:${mode}:${side}`, from loop rounds: day + time */
+    private breakoutSignalled = new Map<string, { day: string; at: string }>();
     // สมัครรับราคาสดของหลายตราสารพร้อมกันได้ (loop วนหลายตราสาร) — key = instrument key
     private spotSubscribed = new Map<string, boolean>();
     private spotSymbolId = new Map<string, number>(); // instrument key -> symbolId subscribed for live prices
@@ -1958,6 +1960,7 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
                 if (!data.series) throw new Error('TA engine requires locally-built series (GOLD_DATA_SOURCE=local)');
                 decision = this.goldTaService.analyze(mode, data.series, { rrMin: cfg.rrMin, sizeCap, profile: p });
                 trace.base_decision = structuredClone(decision);
+                decision = this.firstBreakOnly(decision, mode, p, !dryRun && !demo);
 
                 // AI assist — ชั้นเสริมบน TA (เปิด/ปิดได้จากหน้า start loop)
                 // ปิดอยู่ / ไม่มีคีย์ / AI ล่ม = ใช้ผล TA เดิมต่อ ไม่สะดุด
@@ -2183,6 +2186,44 @@ export class GoldAutomateService implements OnModuleInit, OnModuleDestroy {
             // demo rounds stay out of the archive: it is the record of the real bot (backtests)
             if (!demo) this.archiveRound(mode, archData, archResult, p, trace);
         }
+    }
+
+    /**
+     * Only the first range break (scalp #2 / intraday #2) per instrument, mode and side per UTC day is
+     * a trade — the rule the 60-day replay measured. The TA keeps seeing "a close beyond the edge"
+     * for hours while price stays outside the range; 10–12 Nov those later signals came back every
+     * 5–15 minutes after the first one had been blocked, and were (rightly) vetoed as late entries.
+     * `record` = a live loop round: the first signal is remembered whatever happens to it next
+     * (AI veto, a guard, the order). Manual analysis and demo rounds only read the record.
+     */
+    private firstBreakOnly(d: GoldDecision, mode: GoldMode, p: InstrumentProfile, record: boolean): GoldDecision {
+        if (d.order_type === 'NO_TRADE' || !/#2$/.test(d.playbook_ref)) return d;
+        const side = d.order_type.startsWith('BUY') ? 'BUY' : 'SELL';
+        const key = `${p.key}:${mode}:${side}`;
+        const now = new Date();
+        const day = now.toISOString().slice(0, 10);
+        const first = this.breakoutSignalled.get(key);
+        const placed = this.breakoutDone.get(key) === day;
+        if ((first && first.day === day) || placed) {
+            const reason = `${d.playbook_ref}: the ${side} break was already signalled today${first?.day === day ? ` at ${first.at} UTC` : ''} — only the first break per side per day is traded`;
+            return {
+                ...d,
+                order_type: 'NO_TRADE',
+                entry: null,
+                sl: null,
+                tp1: null,
+                tp2: null,
+                rr_tp1: null,
+                confidence: 0,
+                valid_until_utc: null,
+                reason,
+                analysis_summary: reason,
+                near_miss: false,
+                near_miss_rule: undefined,
+            };
+        }
+        if (record) this.breakoutSignalled.set(key, { day, at: now.toISOString().slice(11, 16) });
+        return d;
     }
 
     /** the AI quota is shared and costs money; demo rounds never touch it */

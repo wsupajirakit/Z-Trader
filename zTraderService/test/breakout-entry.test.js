@@ -127,3 +127,39 @@ test('a LIMIT entry is untouched by the market check', async () => {
     assert.equal(sent[0].orderType, 'LIMIT');
     assert.equal(sent[0].price, 1.0995);
 });
+
+// ---- first break only (runMode → firstBreakOnly) ----
+const ta = (over = {}) => decision({ playbook_ref: 'intraday #2', ...over });
+
+test('only the first range break per side per day is a trade; later signals become NO_TRADE', () => {
+    const { o } = bot();
+    o.breakoutSignalled = new Map();
+    const first = o.firstBreakOnly(ta(), 'intraday', EUR, true);
+    assert.equal(first.order_type, 'BUY_STOP', 'the first signal goes through');
+    const later = o.firstBreakOnly(ta({ entry: 1.102 }), 'intraday', EUR, true);
+    assert.equal(later.order_type, 'NO_TRADE');
+    assert.match(later.reason, /BUY break was already signalled today at \d\d:\d\d UTC — only the first break per side per day/);
+    assert.equal(later.near_miss, false, 'not handed to the AI lead as a near miss');
+    // the other side, the other mode and non-break playbooks are independent
+    assert.equal(o.firstBreakOnly(ta({ order_type: 'SELL_STOP', entry: 1.099, sl: 1.1, tp1: 1.0975 }), 'intraday', EUR, true).order_type, 'SELL_STOP');
+    assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'scalp #2' }), 'scalp', EUR, true).order_type, 'BUY_STOP');
+    assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'scalp #1', order_type: 'BUY_LIMIT' }), 'scalp', EUR, true).order_type, 'BUY_LIMIT');
+    assert.equal(o.firstBreakOnly(ta({ playbook_ref: 'scalp #1', order_type: 'BUY_LIMIT' }), 'scalp', EUR, true).order_type, 'BUY_LIMIT');
+});
+
+test('manual analysis and demo rounds do not use up the day\'s first break', () => {
+    const { o } = bot();
+    o.breakoutSignalled = new Map();
+    assert.equal(o.firstBreakOnly(ta(), 'intraday', EUR, false).order_type, 'BUY_STOP');
+    assert.equal(o.firstBreakOnly(ta(), 'intraday', EUR, false).order_type, 'BUY_STOP');
+    assert.equal(o.firstBreakOnly(ta(), 'intraday', EUR, true).order_type, 'BUY_STOP', 'the loop still gets its first break');
+});
+
+test('a break already placed today (e.g. a confirmed manual analysis) also blocks later signals', () => {
+    const { o } = bot();
+    o.breakoutSignalled = new Map();
+    o.breakoutDone.set(`${EUR.key}:intraday:BUY`, new Date().toISOString().slice(0, 10));
+    const d = o.firstBreakOnly(ta(), 'intraday', EUR, true);
+    assert.equal(d.order_type, 'NO_TRADE');
+    assert.match(d.reason, /already signalled today — only the first break/);
+});

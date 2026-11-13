@@ -92,3 +92,49 @@ slippage around news. Treat the result as a direction, confirmed or not by the n
 
 `tools/replay/breakout_replay.py` — pure python, no dependencies; the header lists the two `curl`
 commands that fetch the data.
+
+## Follow-up, 10–13 November 2026
+
+Three London sessions after the change. The TA found 31 range-break signals; **the AI assist
+(strictness `strict`) vetoed 28**, one more was dropped after an AI adjustment cut its R:R, and 2
+orders went out (one expired unfilled, one won +1.79R / +$634).
+
+Simulated on the real cTrader M5 bars (STOP valid 2 h, SL/TP as sent, breakeven at +1R), the
+first signal per instrument, side and day:
+
+| Signal | AI | What the market did |
+|---|---|---|
+| 10 Nov GBPUSD scalp BUY | veto | STOP never triggered |
+| 10 Nov EURUSD intraday BUY | veto | SL −1R |
+| 11 Nov GBPUSD scalp SELL | adjusted, R:R too low | TP +2.08R |
+| 11 Nov EURUSD intraday SELL | sent | TP +1.79R (real) |
+| 11 Nov GBPUSD intraday SELL | veto | TP +1.80R |
+| 11 Nov EURUSD scalp SELL | veto | TP +1.49R |
+| 11 Nov USDJPY intraday BUY | veto | TP +1.80R |
+| 12 Nov USDJPY scalp BUY | veto | SL −1R |
+| 12 Nov XAUUSD intraday SELL | veto | TP +2.45R |
+
+8 fills: 6 TP, 2 SL, +9.4R in total; the AI let through +1.8R of it. Its stated reason on the
+winners was the instrument rule "TP1 must not cross the next figure / previous-day high-low",
+which caps a breakout target in front of levels a holding break runs through. The rest of the
+vetoes were the TA re-issuing the same break every 5–15 minutes for hours after the first one
+had been blocked — correctly called late.
+
+Changes:
+
+- **First break only.** A range break is a trade only on its first signal per instrument, mode
+  and side per UTC day (loop rounds; manual analysis does not use it up). Later signals are
+  `NO_TRADE` with the time of the first. This is the rule the replay measured.
+- **Assist prompt.** For scalp #2 / intraday #2 the AI may not adjust or veto because TP1
+  crosses a round number or prior-day level, nor call the entry late; it may veto for a major
+  release inside the horizon, a data error, or clearly opposing companions.
+- **Setting.** AI decision mode set to *TA only*, the configuration the replay measured.
+  Switch it back on the dashboard (AI → decision mode) at any time.
+
+9 signals are far too few to rate the AI in general — the point is narrower: the one rule it
+applied most often is not part of the measured strategy and cut every one of these breakouts.
+
+Separately, 242 rounds (20%) were again "cTrader not authorized". The macOS power log shows the
+Mac asleep 05:00–15:00 BKK with brief Power Nap wake-ups at those times — there is no network
+during them, so no client can stay signed in. Keep the machine awake while the loop runs
+(`caffeinate -i -w <service pid>`) or run the bot on the server.
